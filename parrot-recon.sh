@@ -51,7 +51,7 @@ echo "$red[+] Starting Domain Brute Force$white"
 gobuster dir -u $domain -w /usr/share/wordlists/dirbuster/directory-list-1.0.txt -o $results_dir/server-dirs.txt
 
 echo "$red[+] Starting Amass$white"
-amass enum -d $domain -o $results_dir/amass.txt
+amass enum -d $domain -o $results_dir/amass.txt -r 8.8.8.8
 
 echo "$red[+] Starting SSL Scans$white"
 sslyze --regular $domain > $results_dir/sslyze-regular.txt
