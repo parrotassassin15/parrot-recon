@@ -2,7 +2,7 @@
 
 install:
 ```
-git clone https://github.com/parrotassassin15/parrot-recon
+git clone https://github.com/parrotassassin15/parrot-recon.git
 ```
 
 ```
