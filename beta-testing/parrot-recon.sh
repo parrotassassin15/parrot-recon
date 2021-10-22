@@ -160,6 +160,9 @@ commix -u https://$domain --level 3 || commix -u http://$domain --level 3
 echo "$red[+] Starting HTTP SMUGGLING Enumeration$white"
 python3 $tools_dir/smuggle.py -u https://$domain > $results_dir/smuggle-$domain.txt || python3 $tools_dir/smuggle.py -u http://$domain > $results_dir/smuggle-$domain.txt
 
+echo "$red[+] Starting Protocal Brute Force$white"
+bash $tools_dir/hydra.sh $domain $results_dir/$domain-tcp-scan.nmap
+echo "$green[+] Valid Passwords Outputed To $results_dir/valid_passwords-$domain.txt"
 
 echo "$red[+] Script Done!$white"
 echo "$red[+] Check Your Results Directory For The Output!$white"
