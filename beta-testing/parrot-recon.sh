@@ -149,7 +149,7 @@ python3 $tools_dir/fdsploit.py -u https://$domain > $results_dir/directory-trave
 echo "$red[+] Starting XXE Enumeration$white"
 # need to work on a fix for this 
 # enum up top for a request 
-#ruby $tools_dir/XXEinjector.rb --host=$ipaddr --output=$results_dir/xxe-injection-$domain.txt --phpfilter
+#ruby $tools_dir/XXEinjector.rb --host=$domain r --output=$results_dir/xxe-injection-$domain.txt --phpfilter
 
 echo "$red[+] Starting RFI/LFI Enumeration$white"
 ffuf -c -w /usr/share/wordlists/dirb/common.txt -u  https:$domain/FUZZ -e .php,.html,.js,.asp,.sh -o $results_dir/$domain-ffuf.txt || ffuf -c -w /usr/share/wordlists/dirb/common.txt -u  http:$domain/FUZZ -e .php,.html,.js,.asp,.sh -o $results_dir/$domain-ffuf.txt
