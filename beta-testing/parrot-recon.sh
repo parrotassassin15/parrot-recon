@@ -161,6 +161,5 @@ echo "$red[+] Starting HTTP SMUGGLING Enumeration$white"
 python3 $tools_dir/smuggle.py -u https://$domain > $results_dir/smuggle-$domain.txt || python3 $tools_dir/smuggle.py -u http://$domain > $results_dir/smuggle-$domain.txt
 
 
-
 echo "$red[+] Script Done!$white"
 echo "$red[+] Check Your Results Directory For The Output!$white"
