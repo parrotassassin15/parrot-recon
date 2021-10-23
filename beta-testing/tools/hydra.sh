@@ -1,7 +1,8 @@
-
 domain=$1
-ssh=$(cat $domain-tcp-scan.nmap | grep ssh | cut -b 15,16,17)
-ftp=$(cat $domain-tcp-scan.nmap | grep ftp | cut -b 15,16,17)  
+results=$2
+ssh=$(cat $results | grep ssh | cut -b 15,16,17)
+ftp=$(cat $results | grep ftp | cut -b 15,16,17)  
+ 
 
 function dict {
     read -p "Enter Dictionary List: " wordlist
