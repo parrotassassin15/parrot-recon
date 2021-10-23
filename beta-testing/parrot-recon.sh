@@ -4,7 +4,7 @@
 # is designed for bug bounties not pentests involving a blue team. please be careful when
 # using this tool. Also DISCLAIMER: I WILL NOT BE HELD RESPONSIBLE FOR ANY ILLEGAL ACTIVITY 
 # YOU DECIDE TO DO WITH THIS TOOL. IT WAS MADE FOR ETHICAL PURPOSES. PLEASE BE CARFUL!!!
-
+ 
 # banner
 cat << "EOF"
    ___                    __        ___                  
@@ -34,8 +34,11 @@ results_dir=$working_dir/results
 tools_dir=$working_dir/tools
 
 # prints out website information to look back to 
-echo "[*] Domain Name: $domain"
-echo "[*] IP Address:  $(host $domain | awk '/has address/ { print $4 ; exit }')"
+if [ $# -eq 1 ]
+then 
+   echo "[*] Domain Name: $domain"
+   echo "[*] IP Address:  $(host $domain | awk '/has address/ { print $4 ; exit }')"
+fi
 
 # outputs if user does not enter domain 
 if [ $# -eq 0 ]
@@ -58,7 +61,6 @@ if [ ! -d "$results_dir" ]
 then
    mkdir $results_dir
 fi
-
 
 # enumerating websites domain using the tools from install script
 echo "$blue[+] Starting Website Enumeration"
