@@ -6,12 +6,12 @@ git clone https://github.com/parrotassassin15/parrot-recon.git
 ```
 
 ```
-./install.sh
+sudo chmod +x install.sh ; sudo ./install.sh
 ```
 
 run: 
 ```
-./parrot-recon.sh <domain>
+sudo ./parrot-recon.sh <domain>
 ```
 
 
