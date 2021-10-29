@@ -66,43 +66,46 @@ git clone https://github.com/ticarpi/jwt_tool.git  $tools_dir/jwt_tool
 echo "$red[+] Running Functions To Put Tools In The Right Directory$white"
 
 cmsmap() {
-    
-
+  cd $tools_dir/CMSmap
+  sudo python3 setup.py install
 }
 
 cmsmap
 
 headi() {
-
-
+  cd $tools_dir/headi/
+  go build main.go
+  sudo cp main /bin/headi
 }
 
 headi
 
 injectus() {
-
-
+  cd $tools_dir/Injectus/
+  pip3 install -r requirements.txt
+  cp *.py $tools_dir
 }
 
 injectus
 
 fdsploit() {
-
-
+  cd $tools_dir/FDsploit
+  cp fdploit.py ../
+  pip3 install -r requirements.txt
 }
 
 fdsploit
 
 
 xsrfprobe() {
-
-
+  cd $tools_dir/XSRFProbe
+  sudo python3 setup.py install
 }
 
 xsrfprobe
 
 jwt_tool() {
-
+  echo "$red[!] JWT is not gonna be installed"
 
 }
 
