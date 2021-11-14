@@ -65,7 +65,7 @@ fi
 
 # enumerating websites domain using the tools from install script
 echo "$blue[+] Starting Website Enumeration"
-
+cd tools ; go run main.go -t $url  
 echo "$red[+] Starting URL DORK Scan$white"
 bash $tools_dir/dork.sh $domain > $results_dir/$domain-dork.txt
 echo "$green[+] URL DORK Scan Saved To: $results_dir/$domain-dork.txt"
