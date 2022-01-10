@@ -1,6 +1,9 @@
+# Under Contruction for V2 
+
+
+
 # Parrots Recon ( A Recon Automation Script )
 
-# under contruction ( work needs to be done ) 
 
 install:
 ```
