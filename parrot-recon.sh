@@ -27,9 +27,7 @@ red=`tput setaf 1`
 white=`tput setaf 7`
 green=`tput setaf 2`
 blue=`tput setaf 4`
-domain=$1
-ipaddr=$2
-url=$3 # for perl injection and SQLI DB enumeration/exploitation or whatever the fuck it is 
+domain=$1 
 working_dir=$(cd -P -- "$(dirname -- "$0")" && pwd -P)
 results_dir=$working_dir/results
 tools_dir=$working_dir/tools
@@ -93,9 +91,9 @@ echo "$green[+] Nikto Scan Saved To: $results_dir/nikto-$domain.txt"
 #echo "$red[+] Starting Server Enumeration$white"
 # have not yet picked out a tool for this
 
-echo "$red[+] Starting Request Enumeration$white"
-ruby http-get-header.sh $domain > $results_dir/req.txt
-echo "$green[+] HTTP Request Saved To: $results_dir/req.txt"
+#echo "$red[+] Starting Request Enumeration$white"
+#ruby http-get-header.sh $domain > $results_dir/req.txt
+#echo "$green[+] HTTP Request Saved To: $results_dir/req.txt"
 
 echo "$red[+] Starting Domain and File Brute Force$white"
 dirsearch -u $domain -w /usr/share/wordlists/dirbuster/directory-list-1.0.txt -o $results_dir/$domain-server-dirs.txt
@@ -162,9 +160,9 @@ python3 $tools_dir/sqli.py $domain -o $results_dir/sqli-$domain.txt
 echo "$green[+] SQLI Results Saved To: $results_dir/sqli-$domain.txt"
 
 # i need to work on a more reliable JWT enumeration method
-#echo "$red[+] Starting JWT Enumeration$white"
-#read -p "ENTER A JWT TOKEN (If none press [ENTER]): " token 
-#python3 $tools_dir/jwt_tool.py $token > $results_dir/jwt-enumeration-$domain.txt
+echo "$red[+] Starting JWT Enumeration$white"
+read -p "ENTER A JWT TOKEN (If none press [ENTER]): " token 
+python3 $tools_dir/jwt_tool.py $token > $results_dir/jwt-enumeration-$domain.txt
 
 echo "$red[+] Starting Subdomain Takover Enumeration$white"
 subzy -targets $results_dir/subdomains-$domain.txt > $results_dir/takeover-$domain.txt
@@ -180,8 +178,9 @@ echo "$green[+] DIRECTORY TRAVERSAL Results Saved To: $results_dir/directory-tra
 #ruby $tools_dir/XXEinjector.rb --host=$domain r --output=$results_dir/xxe-injection-$domain.txt --phpfilter
 
 echo "$red[+] Starting RFI/LFI Enumeration$white"
-ffuf -c -w /usr/share/wordlists/dirb/common.txt -u  https:$domain/FUZZ -e .php,.html,.js,.asp,.sh -o $results_dir/$domain-ffuf.txt || ffuf -c -w /usr/share/wordlists/dirb/common.txt -u  http:$domain/FUZZ -e .php,.html,.js,.asp,.sh -o $results_dir/$domain-ffuf.txt
-echo "$green[+] RFI/LFI Results Saved To: $results_dir/$domain-ffuf.txt"
+echo "$red[+] Skipping til the sytax is fixed"
+#ffuf -c -w /usr/share/wordlists/dirb/common.txt -u  https:$domain/FUZZ -e .php,.html,.js,.asp,.sh -o $results_dir/$domain-ffuf.txt || ffuf -c -w /usr/share/wordlists/dirb/common.txt -u  http:$domain/FUZZ -e .php,.html,.js,.asp,.sh -o $results_dir/$domain-ffuf.txt
+#echo "$green[+] RFI/LFI Results Saved To: $results_dir/$domain-ffuf.txt"
 
 #echo "$red[+] Starting OS COMMAND INJECTION Enumeration$white"
 #commix -u https://$domain --level 3 || commix -u http://$domain --level 3 
