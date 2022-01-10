@@ -112,5 +112,14 @@ jwt_tool() {
 jwt_tool
 
 
+# read -p "Enter Password for webdav access" pass
+# read -e 
+
+# needs to be set up properly
+echo "$red[+] Setting up webDAV portion"
+sudo cp webdav/wsgidav.service /etc/systemd/system/wsgidav.service
+
+
+
 echo "$green[+] Script Done!"
 echo "$green[+] You are Ready To Use Parrot-Recon!"
