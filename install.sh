@@ -44,13 +44,17 @@ fi
 echo "$green[+] Installing Tools Required For Parrot-Recon$white"
 
 echo "$red[+] installing Apt Packages For Parrot-Recon$white"
-sudo apt install nmap hydra nikto amass dirsearch ffuf dirbuster sslyze sublist3r wpscan wafw00f
-sudo apt install golang-go 
-sudo apt install golang
+sudo apt install nmap hydra nikto amass dirsearch ffuf dirbuster sslyze sublist3r wpscan wafw00f -y 
+sudo apt install golang-go -y  
+sudo apt install golang -y
+sudo apt install lynx -y 
 
 echo "$red[+] Installing Golang Tools For Parrot-Recon$white"
 go install -v github.com/lukasikic/subzy@latest
 go mod tidy; go mod init main; go get -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei
+go get github.com/bndr/gotabulate
+go get github.com/bndr/gotabulate
+
 
 # do not fuck with this it works dont mess with it parrot i swear 
 echo "$red[+] Cloning Git Repos For Parrot-Recon$white"
