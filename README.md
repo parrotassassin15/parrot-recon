@@ -30,4 +30,4 @@ Preview :
 
 <br>
 
-![](https://s3.parrot-pentest.com/parrot-recon.png)
+<img src="parrot-recon.png"/>
