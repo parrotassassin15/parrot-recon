@@ -1,7 +1,3 @@
-# Under Contruction for V2 
-
-
-
 # Parrots Recon ( A Recon Automation Script )
 
 
@@ -19,5 +15,17 @@ run:
 sudo ./parrot-recon.sh <domain>
 ```
 
-I hope you enjoy this script if you are lazy like me you'll love it!
+<br>
 
+# New Release Coming Soon! 
+
+- API Enumeration 
+- Web Enumerataion 
+- Vulnerability Scans 
+- Portable Web Dav Server ( Via Linode or AWS CLI )
+
+<br>
+
+Preview :
+
+<img src="https://s3.parrot-pentest.com/parrot-recon.png"/>
