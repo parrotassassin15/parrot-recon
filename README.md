@@ -28,4 +28,6 @@ sudo ./parrot-recon.sh <domain>
 
 Preview :
 
-<img src="https://s3.parrot-pentest.com/parrot-recon.png"/>
+<br>
+
+![](https://s3.parrot-pentest.com/parrot-recon.png)
