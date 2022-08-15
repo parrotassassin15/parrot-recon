@@ -40,12 +40,54 @@ then
 fi
 
 # outputs if user does not enter domain 
+#if [ $# -eq 0 ]
+#then
+#   echo "[!] No Domain Defined"
+#   echo "[-] Usage: ./parrot-recon.sh <domain>"
+#   exit 0
+#fi
+
+# argument parsing
+while [ $# -gt 0 ]; do
+        key="$1"
+        case "${key}" in
+        -d | --domain)
+                domain="$1"
+                shift
+                shift
+                ;;
+        -t | --type)
+                TYPE="$1"
+                shift
+                shift
+                ;;
+        -w | --wordlist)
+                WORDLIST="$1"
+                shift
+                shift
+                ;;
+        esac
+done
+
+
+# usage screen 
+usage() {
+      printf "\n" # just because there needs to be a line break and I am too lazy to do it on echo 
+      echo "$green Usage:$white ./parrot-recon.sh -d/--domain <domain> -t/--type <scan-type>"
+      echo "$green Optional:$white [ -w/--wordlist ]"
+      printf "\n" # just because there needs to be a line break and I am too lazy to do it on echo 
+      echo "Scan Types:"
+        echo "$red API$white - Enumerates an API Finds Endpoints + Finds Common Misconfigurations"
+        echo "$red WEB$white - Enumerates Web Application + Fuzzes Application & Runs a Vulnerability Scan"
+        echo "$red ALL$white - API Enumeration + Web Enumeration"
+        exit 0
+}
+
+# outputs if user does not enter domain 
 if [ $# -eq 0 ]
-then
-   echo "[!] No Domain Defined"
-   echo "[-] Usage: ./parrot-recon.sh <domain>"
-   exit 0
-fi
+then 
+   usage
+fi 
 
 # checking to make sure user is running script as sudo
 if [ `whoami` != "root" ]
@@ -61,6 +103,22 @@ then
    mkdir $results_dir
 fi
 
+# printing out scan configurations 
+scan_config() {
+    echo 
+   if expr "${TYPE}" : '^\([Aa]ll\)$' >/dev/null; then
+               echo "Running all scans on $domain"
+      else
+               echo "Running a ${TYPE} scan on $domain"
+   fi
+}
+
+main() {
+   header
+}
+# all the stuff below needs to be worked out later in giant if and else statments 
+
+'''
 # enumerating websites domain using the tools from install script
 echo "$blue[+] Starting Website Enumeration"
 go run $tools_dir/main.go -t http://$domain || go run $tools_dir/main.go -t https://$domain   
@@ -73,7 +131,7 @@ nmap -sV -sC $domain -oA $results_dir/$domain-tcp-scan --open
 echo "$green[+] Nmap TCP Scan Saved To: $results_dir/$domain-tcp-scan"
 
 echo "$red[+] Starting Nmap UDP Scan$white"
-nmap -sV -sU $domain -oA $results_dir/$domain-udp-scan --open 
+#nmap -sV -sU $domain -oA $results_dir/$domain-udp-scan --open 
 echo "$green[+] Nmap UDP Scan Saved To: $results_dir/$domain-udp-scan"
 
 echo "$red[+] Starting IDS/IPS Detection $white"
@@ -199,3 +257,4 @@ python3 webdav/webdav.py
 
 echo "$red[+] Script Done!$white"
 echo "$red[+] Check Your WebDAV For The Results!$white"
+'''
