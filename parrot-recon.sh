@@ -116,7 +116,7 @@ scan_config() {
 main() {
    header
 }
-# all the stuff below needs to be worked out later in giant if and else statments 
+
 
 '''
 # enumerating websites domain using the tools from install script
