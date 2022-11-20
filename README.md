@@ -8,12 +8,12 @@ git clone https://github.com/parrotassassin15/parrot-recon.git
 ```
 
 ```
-sudo chmod +x install.sh ; sudo ./install.sh
+sudo chmod +x install-{platform}.sh ; sudo ./install-{platform}.sh
 ```
 
 run: 
 ```
-sudo ./parrot-recon.sh <domain>
+sudo ./parrot-recon.sh -d <domain> -t <scan type> -w <wordlist>
 ```
 
 <br>
