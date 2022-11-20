@@ -1,0 +1,5 @@
+[~] Targeting Domain ->  
+[~] Fixed URL ->  item_id=15
+[!] Trying Payload item_id=15
+SExtraction -> Extracted 0 urls and listed them in '/home/kali/Learning/development/parrot-recon/urls' file for reference.
+

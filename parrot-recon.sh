@@ -27,55 +27,36 @@ red=`tput setaf 1`
 white=`tput setaf 7`
 green=`tput setaf 2`
 blue=`tput setaf 4`
-domain=$1 
 working_dir=$(cd -P -- "$(dirname -- "$0")" && pwd -P)
 results_dir=$working_dir/results
 tools_dir=$working_dir/tools
+format_newline='printf \n'
 
-# prints out website information to look back to 
-if [ $# -eq 1 ]
-then 
-   echo "[*] Domain Name: $domain"
-   echo "[*] IP Address:  $(host $domain | awk '/has address/ { print $4 ; exit }')"
-fi
 
-# outputs if user does not enter domain 
-#if [ $# -eq 0 ]
-#then
-#   echo "[!] No Domain Defined"
-#   echo "[-] Usage: ./parrot-recon.sh <domain>"
-#   exit 0
-#fi
-
-# argument parsing
-while [ $# -gt 0 ]; do
-        key="$1"
-        case "${key}" in
-        -d | --domain)
-                domain="$1"
-                shift
-                shift
-                ;;
-        -t | --type)
-                TYPE="$1"
-                shift
-                shift
-                ;;
-        -w | --wordlist)
-                WORDLIST="$1"
-                shift
-                shift
-                ;;
-        esac
-done
+# argument parsing to decide what scan should be ran
+case $1 in
+   -d | --domain)
+         domain=$2
+         ;;
+esac 
+case $3 in
+   -t | --type)
+         type=$4
+         ;;
+esac
+case $5 in
+   -w | --wordlist)
+         wordlist=$6
+         ;;
+esac
 
 
 # usage screen 
 usage() {
-      printf "\n" # just because there needs to be a line break and I am too lazy to do it on echo 
+      $format_newline
       echo "$green Usage:$white ./parrot-recon.sh -d/--domain <domain> -t/--type <scan-type>"
-      echo "$green Optional:$white [ -w/--wordlist ]"
-      printf "\n" # just because there needs to be a line break and I am too lazy to do it on echo 
+      echo ""
+      $format_newline
       echo "Scan Types:"
         echo "$red API$white - Enumerates an API Finds Endpoints + Finds Common Misconfigurations"
         echo "$red WEB$white - Enumerates Web Application + Fuzzes Application & Runs a Vulnerability Scan"
@@ -84,7 +65,7 @@ usage() {
 }
 
 # outputs if user does not enter domain 
-if [ $# -eq 0 ]
+if [ $# -lt 6 ]
 then 
    usage
 fi 
@@ -97,35 +78,47 @@ then
 fi
 
 # setting up directories for recon tool
+$format_newline
 echo "[+] Setting Up Enviornment"
 if [ ! -d "$results_dir" ]
 then
    mkdir $results_dir
 fi
 
+# prints out website information to look back to 
+if [ $# -eq 6 ]
+then 
+   echo "[*] Domain Name: $domain"
+   echo "[*] IP Address:  $(host $domain | awk '/has address/ { print $4 ; exit }')"
+fi
+
+
 # printing out scan configurations 
 scan_config() {
-    echo 
-   if expr "${TYPE}" : '^\([Aa]ll\)$' >/dev/null; then
-               echo "Running all scans on $domain"
+      if [[ "$type" == "API" ]];
+      then
+         $format_newline
+         echo "$green[+] Running an API scan on $domain"
+      elif [ "$type" == "WEB" ];
+      then
+         $format_newline
+         echo "$green[+] Running a WEB scan on $domain"
       else
-               echo "Running a ${TYPE} scan on $domain"
-   fi
+         echo "$red Running an unknown scan"
+      fi
 }
 
-main() {
-   header
-}
+scan_config
 
 
-'''
+
 # enumerating websites domain using the tools from install script
 echo "$blue[+] Starting Website Enumeration"
 go run $tools_dir/main.go -t http://$domain || go run $tools_dir/main.go -t https://$domain   
 echo "$red[+] Starting URL DORK Scan$white"
 bash $tools_dir/dork.sh $domain > $results_dir/$domain-dork.txt
 echo "$green[+] URL DORK Scan Saved To: $results_dir/$domain-dork.txt"
-
+exit 0
 echo "$red[+] Starting Nmap TCP Scan$white"
 nmap -sV -sC $domain -oA $results_dir/$domain-tcp-scan --open
 echo "$green[+] Nmap TCP Scan Saved To: $results_dir/$domain-tcp-scan"
@@ -257,4 +250,3 @@ python3 webdav/webdav.py
 
 echo "$red[+] Script Done!$white"
 echo "$red[+] Check Your WebDAV For The Results!$white"
-'''
