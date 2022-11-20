@@ -88,6 +88,7 @@ fi
 # prints out website information to look back to 
 if [ $# -eq 6 ]
 then 
+   $format_newline
    echo "[*] Domain Name: $domain"
    echo "[*] IP Address:  $(host $domain | awk '/has address/ { print $4 ; exit }')"
 fi
@@ -110,7 +111,9 @@ scan_config() {
 
 scan_config
 
-
+$format_newline
+echo "$red[!] Script is Broken Please Wait Til Offical Release"
+exit 0 
 
 # enumerating websites domain using the tools from install script
 echo "$blue[+] Starting Website Enumeration"
