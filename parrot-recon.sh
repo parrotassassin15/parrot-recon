@@ -34,86 +34,94 @@ format_newline='printf \n'
 
 
 # argument parsing to decide what scan should be ran
-case $1 in
-   -d | --domain)
-         domain=$2
-         ;;
-esac 
-case $3 in
-   -t | --type)
-         type=$4
-         ;;
-esac
-case $5 in
-   -w | --wordlist)
-         wordlist=$6
-         ;;
-esac
-
-
-# usage screen 
-usage() {
-      $format_newline
-      echo "$green Usage:$white ./parrot-recon.sh -d/--domain <domain> -t/--type <scan-type>"
-      echo ""
-      $format_newline
-      echo "Scan Types:"
-        echo "$red API$white - Enumerates an API Finds Endpoints + Finds Common Misconfigurations"
-        echo "$red WEB$white - Enumerates Web Application + Fuzzes Application & Runs a Vulnerability Scan"
-        echo "$red ALL$white - API Enumeration + Web Enumeration"
-        exit 0
+format_newline() {
+    printf "\n"
 }
 
-# outputs if user does not enter domain 
-if [ $# -lt 6 ]
-then 
-   usage
-fi 
+# Usage function
+usage() {
+    format_newline
+    echo "${green}Usage:${white} $0 -d <domain> -t <scan-type> -w <wordlist>"
+    format_newline
+    echo "Scan Types:"
+    echo "${red}API${white} - Enumerates an API and finds common misconfigurations"
+    echo "${red}WEB${white} - Enumerates a Web Application and runs a vulnerability scan"
+    echo "${red}ALL${white} - Performs both API and Web enumeration"
+    exit 0
+}
 
-# checking to make sure user is running script as sudo
-if [ `whoami` != "root" ]
-then
-   echo "[!] This Script Needs To Be Run As Root User"
-   exit 0
+# Parse command-line options
+while getopts ":d:t:w:h" opt; do
+    case ${opt} in
+        d )
+            domain=${OPTARG}
+            ;;
+        t )
+            type=${OPTARG}
+            ;;
+        w )
+            wordlist=${OPTARG}
+            ;;
+        h )
+            usage
+            ;;
+        \? )
+            echo "${red}Invalid option: -${OPTARG}${reset}" >&2
+            usage
+            ;;
+        : )
+            echo "${red}Option -${OPTARG} requires an argument.${reset}" >&2
+            usage
+            ;;
+    esac
+done
+
+# Validate required arguments
+if [ -z "$domain" ] || [ -z "$type" ]; then
+    echo "${red}Domain and type are required.${reset}"
+    usage
 fi
 
-# setting up directories for recon tool
-$format_newline
-echo "[+] Setting Up Enviornment"
-if [ ! -d "$results_dir" ]
-then
-   mkdir $results_dir
+# Check for root privileges
+if [ "$(id -u)" -ne 0 ]; then
+    echo "${red}[!] This script must be run as root.${reset}"
+    exit 1
 fi
 
-# prints out website information to look back to 
-if [ $# -eq 6 ]
-then 
-   $format_newline
-   echo "[*] Domain Name: $domain"
-   echo "[*] IP Address:  $(host $domain | awk '/has address/ { print $4 ; exit }')"
-fi
+# Environment setup
+format_newline
+echo "[+] Setting Up Environment"
+mkdir -p "$results_dir"
 
+# Output domain information
+format_newline
+echo "[*] Domain Name: $domain"
+ip_address=$(host $domain | awk '/has address/ { print $4 ; exit }')
+echo "[*] IP Address: $ip_address"
 
-# printing out scan configurations 
+# Scan configuration
 scan_config() {
-      if [[ "$type" == "API" ]];
-      then
-         $format_newline
-         echo "$green[+] Running an API scan on $domain"
-      elif [ "$type" == "WEB" ];
-      then
-         $format_newline
-         echo "$green[+] Running a WEB scan on $domain"
-      else
-         echo "$red Running an unknown scan"
-      fi
+    case $type in
+        "API" )
+            echo "${green}[+] Running an API scan on $domain${reset}"
+            ;;
+        "WEB" )
+            echo "${green}[+] Running a WEB scan on $domain${reset}"
+            ;;
+        "ALL" )
+            echo "${green}[+] Running both API and WEB scans on $domain${reset}"
+            ;;
+        * )
+            echo "${red}Unknown scan type: $type${reset}"
+            usage
+            ;;
+    esac
 }
 
 scan_config
 
-$format_newline
-echo "$red[!] Script is Broken Please Wait Til Offical Release"
-exit 0 
+echo "[!] This script is still under development"
+exit 0
 
 # enumerating websites domain using the tools from install script
 echo "$blue[+] Starting Website Enumeration"
