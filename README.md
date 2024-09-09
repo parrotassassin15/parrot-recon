@@ -16,11 +16,12 @@ sudo ./parrot-recon.sh -d <domain> -t <scan type> -w <wordlist>
 
 <br>
 
-# New Release Coming Soon! 
-
-- API Enumeration 
+# Current Release Support
 - Web Enumerataion 
 - Vulnerability Scans 
+
+# New Releases Coming Soon
+- API Enumeration 
 - Sends Email with Mailgun
 - Opens Local Web Server for Results
 
