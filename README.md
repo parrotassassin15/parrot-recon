@@ -1,6 +1,4 @@
-<h1 style="color: red;"> !! Broken Code !! </h1> <br> <h1> ( Project is In Development For Final Release ) <h1> 
-
-## Parrots Recon ( A Recon Automation Script )
+## Parrots Recon ( A Recon Automation Script Beta V1 )
 
 install:
 ```
@@ -23,7 +21,8 @@ sudo ./parrot-recon.sh -d <domain> -t <scan type> -w <wordlist>
 - API Enumeration 
 - Web Enumerataion 
 - Vulnerability Scans 
-- Portable Web Dav Server ( Via Linode or AWS CLI )
+- Sends Email with Mailgun
+- Opens Local Web Server for Results
 
 <br>
 
