@@ -41,7 +41,7 @@ format_newline() {
 # Usage function
 usage() {
     format_newline
-    echo "${green}Usage:${white} $0 -d <domain> -t <scan-type> -w <wordlist>"
+    echo "${green}Usage:${white} $0 -d <domain> -t <scan-type> -w <wordlist> -c <api collection>"
     format_newline
     echo "Scan Types:"
     echo "${red}API${white} - Enumerates an API and finds common misconfigurations"
@@ -51,8 +51,56 @@ usage() {
 }
 
 api_scan(){
-    echo "[!] API Scanning Not set up yet"
+    echo "[!] Starting API Scanning"
+
+    echo "[+] Extracting API URLs from Collection File: $api_collection"
+    
+    case "$api_collection" in
+        *.json)
+            echo "[*] JSON file detected. Extracting URLs using grep on $api_collection"
+            cat "$api_collection" | grep -oP '"raw":\s*"\Khttps?://[^"]+' > api_urls.txt
+            ;;
+        *.yaml|*.yml)
+            echo "[*] YAML file detected. Extracting URLs using grep on $api_collection"
+            cat $api_collection | grep 'url' | cut -d ':' -f3 | tr -d ' ' | tr -d '"' | cut -d '/' -f3 | sed 's/^/https:\/\//' > api_urls.txt
+            ;;
+        *)
+            echo "[!] Error: Unsupported file format. Please provide a .json or .yaml/.yml file."
+            ;;
+    esac
+
+
+    echo "$blue[+] URLs extracted and saved to api_urls.txt$white"
+
+    url=$(cat api_urls.txt)
+
+    # url without https://
+    url_no_https=$(echo $url | sed 's/https:\/\///')
+
+    echo "$red[+] Starting Nmap Script Vuln Enumeration on Endpoint$white"
+    nmap -sV -sC -p 443 --script=vuln -oA $results_dir/nmap-api-vuln-scan $url_no_https
+    echo "$green[+] Nmap Script Vuln Enumeration Saved To: $results_dir/nmap-api-vuln-scan"
+
+    echo "$red[+] Starting Nitko Scan for API$white"
+    nikto -h $url -o $results_dir/nikto-api-scan.txt
+    echo "$green[+] Nikto Scan Saved To: $results_dir/nikto-api-scan.txt"
+
+    echo "$red[+] Checking for Authentication Bypass$white"
+    # Get the HTTP response code using cURL
+    response=$(curl -s -o /dev/null -w "%{http_code}" "$url")
+    # Output the URL and response code
+    echo "----------------- Results -------------------"
+    echo "$url - $response"
+    # Check if the response code is 200
+    if [ "$response" -eq 200 ]; then
+        echo "$red[-] Authentication bypass may be possible $white"
+    else
+        echo "$green[+] Authentication bypass may not not possible $white"
+    fi
+
+    exit 0
 }
+
 
 scan_all(){
     api_scan
@@ -71,9 +119,9 @@ web_scan(){
     nmap -sV -sC $domain -oA $results_dir/$domain-tcp-scan --open
     echo "$green[+] Nmap TCP Scan Saved To: $results_dir/$domain-tcp-scan"
 
-    echo "$red[+] Starting Nmap UDP Scan$white"
-    nmap -sV -sU $domain -oA $results_dir/$domain-udp-scan --open 
-    echo "$green[+] Nmap UDP Scan Saved To: $results_dir/$domain-udp-scan"
+#    echo "$red[+] Starting Nmap UDP Scan$white"
+#    nmap -sV -sU $domain -oA $results_dir/$domain-udp-scan --open 
+#    echo "$green[+] Nmap UDP Scan Saved To: $results_dir/$domain-udp-scan"
 
     echo "$red[+] Starting IDS/IPS Detection $white"
     wafw00f https://$domain -o $results_dir/wafw00f-$domain.txt || wafw00f http://$domain -o $results_dir/wafw00f-$domain.txt
@@ -103,21 +151,26 @@ web_scan(){
     nuclei -u $domain -o $results_dir/nuclei-$domain.txt
     echo "$green[+] Neclei Scans Saved To: $results_dir/nuclei-$domain.txt"
 
-    echo "$red[+] Starting Request Enumeration$white"
-    ruby http-get-header.sh $domain > $results_dir/req.txt
-    echo "$green[+] HTTP Request Saved To: $results_dir/req.txt"
+#    echo "$red[+] Starting Request Enumeration$white"
+#    ruby http-get-header.sh $domain > $results_dir/req.txt
+#    echo "$green[+] HTTP Request Saved To: $results_dir/req.txt"
+
+    echo "$red[+] Starting Secure Headers Check$white"
+    python3 $tools_dir/shcheck/shcheck.py > $result_dir/$domain-shcheck.txt
+    echo "$green[+] Shcheck Results Saved To: $results_dir/$domain-shcheck.txt"
 
     echo "$red[+] Starting CORS Enumeration$white"
     python3 $tools_dir/cors_scanner.py -u https://$domain -csv $results_dir/$domain-cors.csv || python3 $tools_dir/cors_scanner.py -u http://$domain -csv $results_dir/$domain-cors.csv
     echo "$green[+] CORS Enumaration Results Saved To: $results_dir/$domain-cors.csv"
 
     echo "$red[+] Starting HTTP HEADER INJECTION Enumeration$white"
-    headi -u https://$domain/ > $results_dir/headi-$domain.txt || headi -u http://$domain/ > $results_dir/headi-$domain.txt
+    $tools_dir/headi -u https://$domain/ > $results_dir/headi-$domain.txt || headi -u http://$domain/ > $results_dir/headi-$domain.txt
     echo "$green[+] HTTP HEADER INJECTION Results Saved To: $results_dir/headi-$domain.txt"
 }
 
+
 # Parse command-line options
-while getopts ":d:t:w:h" opt; do
+while getopts ":d:t:w:h:c:" opt; do
     case ${opt} in
         d )
             domain=${OPTARG}
@@ -130,6 +183,9 @@ while getopts ":d:t:w:h" opt; do
             ;;
         h )
             usage
+            ;;
+        c ) 
+            api_collection=${OPTARG}
             ;;
         \? )
             echo "${red}Invalid option: -${OPTARG}${reset}" >&2
@@ -170,6 +226,7 @@ scan_config() {
     case $type in
         "API" )
             echo "${green}[+] Running an API scan on $domain${reset}"
+            api_scan
             ;;
         "WEB" )
             echo "${green}[+] Running a WEB scan on $domain${reset}"
@@ -188,11 +245,11 @@ scan_config() {
 scan_config
 
 
-echo "$red[+] Sending Completion Email "
-python3 mailserver/sendemail.py
+#echo "$red[+] Sending Completion Email "
+#python3 mailserver/sendemail.py
 
-echo "$red[+] Opening Web Server"
-python3 webdav/webserver.py
+#echo "$red[+] Opening Web Server"
+#python3 webdav/webserver.py
 
 echo "$red[+] Script Done!$white"
 echo "$red[+] Check Your WebDAV For The Results!$white"
