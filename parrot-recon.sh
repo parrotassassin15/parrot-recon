@@ -156,7 +156,7 @@ web_scan(){
 #    echo "$green[+] HTTP Request Saved To: $results_dir/req.txt"
 
     echo "$red[+] Starting Secure Headers Check$white"
-    python3 $tools_dir/shcheck/shcheck.py > $result_dir/$domain-shcheck.txt
+    python3 $tools_dir/shcheck.py > $result_dir/$domain-shcheck.txt
     echo "$green[+] Shcheck Results Saved To: $results_dir/$domain-shcheck.txt"
 
     echo "$red[+] Starting CORS Enumeration$white"
