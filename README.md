@@ -18,10 +18,10 @@ sudo ./parrot-recon.sh -d <domain> -t <scan type> -w <wordlist>
 
 # Current Release Support
 - Web Enumerataion 
-- Vulnerability Scans 
+- Vulnerability Scans
+-  API Enumeration 
 
 # New Releases Coming Soon
-- API Enumeration 
 - Sends Email with Mailgun
 - Opens Local Web Server for Results
 
