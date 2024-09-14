@@ -151,14 +151,11 @@ web_scan(){
     nuclei -u $domain -o $results_dir/nuclei-$domain.txt
     echo "$green[+] Neclei Scans Saved To: $results_dir/nuclei-$domain.txt"
 
-#    echo "$red[+] Starting Request Enumeration$white"
-#    ruby http-get-header.sh $domain > $results_dir/req.txt
-#    echo "$green[+] HTTP Request Saved To: $results_dir/req.txt"
 
     echo "$red[+] Starting Secure Headers Check$white"
-    python3 $tools_dir/shcheck.py > $result_dir/$domain-shcheck.txt
+    python3 $tools_dir/shcheck.py https://$domain > $results_dir/$domain-shcheck.txt || python3 $tools_dir/shcheck.py http://$domain > $results_dir/$domain-shcheck.txt
     echo "$green[+] Shcheck Results Saved To: $results_dir/$domain-shcheck.txt"
-
+    
     echo "$red[+] Starting CORS Enumeration$white"
     python3 $tools_dir/cors_scanner.py -u https://$domain -csv $results_dir/$domain-cors.csv || python3 $tools_dir/cors_scanner.py -u http://$domain -csv $results_dir/$domain-cors.csv
     echo "$green[+] CORS Enumaration Results Saved To: $results_dir/$domain-cors.csv"
