@@ -1,4 +1,4 @@
-## Parrots Recon ( A Recon Automation Script Beta V1 )
+## Parrots Recon ( A Recon Automation Script Beta V2 )
 
 install:
 ```
