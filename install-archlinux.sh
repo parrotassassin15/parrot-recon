@@ -55,7 +55,9 @@ fi
 echo "$green[+] Installing Tools Required For Parrot-Recon$white"
 
 echo "$red[+] Installing Pacman Packages For Parrot-Recon$white"
-sudo pacman -S nmap hydra nikto amass dirsearch ffuf dirbuster sslyze sublist3r wpscan wafw00f -y 
+sudo pacman -S nmap hydra nikto amass dirsearch ffuf dirbuster sslyze sublist3r wpscan wafw00f -y
+# nikto refuses to start without XML::Writer, even for plain text output
+sudo pacman -S perl-xml-writer -y
 sudo pacman -S golang-go -y  
 sudo pacman -S install golang -y
 sudo pacman -S lynx -y 
@@ -63,12 +65,15 @@ sudo pacman -S git
 
 echo "$red[+] Installing Golang Tools For Parrot-Recon$white"
 go install -v github.com/lukasikic/subzy@latest
-go mod tidy; go mod init main; go get -v github.com/projectdiscovery/nuclei/v2/cmd/nuclei
-go get github.com/bndr/gotabulate
-go get github.com/bndr/gotabulate
+go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+
+# tools/ already ships its own go.mod - fetch its deps from inside it.
+# ('go mod tidy' before 'go mod init' could never work, and running either from
+#  the repo root left a stray go.mod that shadowed nothing useful.)
+( cd $tools_dir && go mod download && go build -o /dev/null . )
 
 
-# do not fuck with this it works dont mess with it parrot i swear 
+# do not fuck with this it works dont mess with it parrot i swear
 echo "$red[+] Cloning Git Repos For Parrot-Recon$white"
 git clone https://github.com/Dionach/CMSmap $tools_dir/CMSmap
 git clone https://github.com/mlcsec/headi   $tools_dir/headi
@@ -90,8 +95,12 @@ cmsmap
 
 headi() {
   cd $tools_dir/headi/
-  go build main.go
-  sudo cp main /bin/headi
+  # the upstream repo ships no go.mod, so a bare 'go build main.go' fails under
+  # module-aware go - initialise the module first, then build
+  [ -f go.mod ] || go mod init headi
+  go mod tidy
+  go build -o headi main.go
+  sudo cp headi /bin/headi
 }
 
 headi
