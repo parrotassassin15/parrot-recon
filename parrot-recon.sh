@@ -88,6 +88,19 @@ run_step() {
     return 1
 }
 
+# several tools exit 0 having written nothing at all - sublist3r only creates
+# its output file when it actually found subdomains - so confirm the artifact
+# exists before claiming we saved it
+saved() {
+    local msg=$1 file=$2
+    if [ -s "$file" ]; then
+        ok "$msg"
+        return 0
+    fi
+    warn "No output written to $file (the tool reported success but produced nothing)"
+    return 1
+}
+
 # sslyze exits non-zero whenever a scan command reports a problem (an expired
 # cert, a refused cipher probe) even though the report itself is complete, so
 # judge it by the report it produced rather than by its exit code
@@ -217,8 +230,9 @@ api_scan() {
         while read -r api_host; do
             [ -n "$api_host" ] || continue
             rm -f "$results_dir/nikto-api-$api_host.txt"
+            # -o is a prefix; nikto appends ".<format>" to it
             run_step "Nikto ($api_host)" \
-                nikto -h "$api_host" -o "$results_dir/nikto-api-$api_host.txt" \
+                nikto -h "$api_host" -Format txt -o "$results_dir/nikto-api-$api_host" \
                 && scanned=$((scanned + 1))
         done < "$api_hosts"
         [ "$scanned" -gt 0 ] \
@@ -279,13 +293,13 @@ web_scan() {
 
     if require_tool go "Go SQL error probe"; then
         run_step "SQL error probe" sql_probe "$target" \
-            && ok "SQL Error Probe Saved To: $results_dir/$domain-sqlerror-probe.txt"
+            && saved "SQL Error Probe Saved To: $results_dir/$domain-sqlerror-probe.txt" "$results_dir/$domain-sqlerror-probe.txt"
     fi
 
     if require_tool lynx "URL DORK scan"; then
         step "Starting URL DORK Scan"
         run_step "URL dork scan" bash "$tools_dir/dork.sh" "$domain" "$results_dir/$domain-dork.txt" \
-            && ok "URL DORK Scan Saved To: $results_dir/$domain-dork.txt"
+            && saved "URL DORK Scan Saved To: $results_dir/$domain-dork.txt" "$results_dir/$domain-dork.txt"
     fi
 
     if require_tool nmap "Nmap TCP scan"; then
@@ -304,57 +318,71 @@ web_scan() {
     if require_tool wafw00f "IDS/IPS detection"; then
         step "Starting IDS/IPS Detection"
         run_step "wafw00f" wafw00f "$target" -o "$results_dir/wafw00f-$domain.txt" \
-            && ok "IDS/IPS Results Saved To: $results_dir/wafw00f-$domain.txt"
+            && saved "IDS/IPS Results Saved To: $results_dir/wafw00f-$domain.txt" "$results_dir/wafw00f-$domain.txt"
     fi
 
-    if require_tool sublist3r "Subdomain enumeration"; then
+    if require_tool curl "Subdomain enumeration"; then
         step "Starting Subdomain Enumeration"
-        run_step "sublist3r" sublist3r -d "$domain" -o "$results_dir/subdomains-$domain.txt" \
-            && ok "Subdomains Saved To: $results_dir/subdomains-$domain.txt"
+        # tools/subenum.sh aggregates certspotter, crt.sh, hackertarget,
+        # rapiddns and (when installed) subfinder/sublist3r. sublist3r alone is
+        # no longer sufficient: most of its engines are dead or blocking, and it
+        # writes no file at all when it finds nothing.
+        run_step "subdomain enumeration" \
+            bash "$tools_dir/subenum.sh" "$domain" "$results_dir/subdomains-$domain.txt" \
+            && saved "Subdomains Saved To: $results_dir/subdomains-$domain.txt" \
+                     "$results_dir/subdomains-$domain.txt"
     fi
 
     if require_tool nikto "Nikto scan"; then
         step "Starting Nikto Scan"
         rm -f "$results_dir/nikto-$domain.txt"
-        run_step "Nikto" nikto -h "$domain" -o "$results_dir/nikto-$domain.txt" \
-            && ok "Nikto Scan Saved To: $results_dir/nikto-$domain.txt"
+        # nikto treats -o as a PREFIX and appends ".<format>", so passing
+        # "...nikto-domain.txt" produced "nikto-domain.txt.txt". Give it the
+        # bare prefix and name the format explicitly.
+        run_step "Nikto" nikto -h "$domain" -Format txt -o "$results_dir/nikto-$domain" \
+            && saved "Nikto Scan Saved To: $results_dir/nikto-$domain.txt" "$results_dir/nikto-$domain.txt"
     fi
 
     if require_tool cmsmap "CMS enumeration"; then
         step "Starting CMS Enumeration"
         rm -f "$results_dir/cmsenum-$domain.txt"
-        # -s skips cert validation so a self-signed target does not kill the run
-        run_step "cmsmap" cmsmap -F -s "$target" -o "$results_dir/cmsenum-$domain.txt" \
-            && ok "CMS Enumeration Saved To: $results_dir/cmsenum-$domain.txt"
+        # -s skips cert validation so a self-signed target does not kill the run.
+        # -F (fullscan) is deliberately NOT used: cmsmap's own help describes it
+        # as "False positives and slow!", and it was the step that stalled long
+        # runs. Set CMSMAP_FULL=1 to opt back into it.
+        cmsmap_args=(-s)
+        [ "${CMSMAP_FULL:-0}" = "1" ] && cmsmap_args=(-F -s)
+        run_step "cmsmap" cmsmap "${cmsmap_args[@]}" "$target" -o "$results_dir/cmsenum-$domain.txt" \
+            && saved "CMS Enumeration Saved To: $results_dir/cmsenum-$domain.txt" "$results_dir/cmsenum-$domain.txt"
     fi
 
     if require_tool sslyze "SSL scans"; then
         step "Starting SSL Scans"
         # modern sslyze dropped --regular; a bare invocation already runs the full suite
         run_sslyze "sslyze full scan" "$results_dir/$domain-sslyze-regular.txt" "$domain" \
-            && ok "Regular SSL Scan Saved To: $results_dir/$domain-sslyze-regular.txt"
+            && saved "Regular SSL Scan Saved To: $results_dir/$domain-sslyze-regular.txt" "$results_dir/$domain-sslyze-regular.txt"
         run_sslyze "sslyze heartbleed" "$results_dir/$domain-sslyze-heartbleed.txt" --heartbleed "$domain" \
-            && ok "HeartBleed Scan Saved To: $results_dir/$domain-sslyze-heartbleed.txt"
+            && saved "HeartBleed Scan Saved To: $results_dir/$domain-sslyze-heartbleed.txt" "$results_dir/$domain-sslyze-heartbleed.txt"
         run_sslyze "sslyze robot" "$results_dir/$domain-sslyze-robot.txt" --robot "$domain" \
-            && ok "Robot Scan Saved To: $results_dir/$domain-sslyze-robot.txt"
+            && saved "Robot Scan Saved To: $results_dir/$domain-sslyze-robot.txt" "$results_dir/$domain-sslyze-robot.txt"
     fi
 
     if require_tool nuclei "Nuclei scans"; then
         step "Starting Nuclei Scans"
         run_step "nuclei" nuclei -u "$target" -o "$results_dir/nuclei-$domain.txt" \
-            && ok "Nuclei Scans Saved To: $results_dir/nuclei-$domain.txt"
+            && saved "Nuclei Scans Saved To: $results_dir/nuclei-$domain.txt" "$results_dir/nuclei-$domain.txt"
     fi
 
     if require_tool python3 "Secure headers check"; then
         step "Starting Secure Headers Check"
         run_step "shcheck" \
             bash -c 'python3 "$1" "$2" > "$3" 2>&1' _ "$tools_dir/shcheck.py" "$target" "$results_dir/$domain-shcheck.txt" \
-            && ok "Shcheck Results Saved To: $results_dir/$domain-shcheck.txt"
+            && saved "Shcheck Results Saved To: $results_dir/$domain-shcheck.txt" "$results_dir/$domain-shcheck.txt"
 
         step "Starting CORS Enumeration"
         run_step "cors_scanner" \
             python3 "$tools_dir/cors_scanner.py" -u "$target" -csv "$results_dir/$domain-cors.csv" \
-            && ok "CORS Enumeration Results Saved To: $results_dir/$domain-cors.csv"
+            && saved "CORS Enumeration Results Saved To: $results_dir/$domain-cors.csv" "$results_dir/$domain-cors.csv"
     fi
 
     # headi is built by the install script; it may be on PATH, dropped in tools/,
@@ -377,7 +405,7 @@ web_scan() {
         step "Starting HTTP HEADER INJECTION Enumeration"
         run_step "headi" \
             bash -c '"$1" -u "$2" > "$3" 2>&1' _ "$headi_bin" "$target/" "$results_dir/headi-$domain.txt" \
-            && ok "HTTP HEADER INJECTION Results Saved To: $results_dir/headi-$domain.txt"
+            && saved "HTTP HEADER INJECTION Results Saved To: $results_dir/headi-$domain.txt" "$results_dir/headi-$domain.txt"
     else
         warn "Skipping HTTP header injection: headi is not built (re-run the install script)"
         skipped_steps+=("HTTP header injection (missing: headi)")
@@ -392,12 +420,12 @@ web_scan() {
             step "Starting Content Discovery (ffuf)"
             run_step "ffuf" ffuf -u "$target/FUZZ" -w "$wordlist" -mc 200,201,204,301,302,307,401,403 \
                 -o "$results_dir/$domain-content-discovery.json" -of json \
-                && ok "Content Discovery Saved To: $results_dir/$domain-content-discovery.json"
+                && saved "Content Discovery Saved To: $results_dir/$domain-content-discovery.json" "$results_dir/$domain-content-discovery.json"
         elif have dirsearch; then
             step "Starting Content Discovery (dirsearch)"
             run_step "dirsearch" dirsearch -u "$target" -w "$wordlist" \
                 -o "$results_dir/$domain-content-discovery.txt" \
-                && ok "Content Discovery Saved To: $results_dir/$domain-content-discovery.txt"
+                && saved "Content Discovery Saved To: $results_dir/$domain-content-discovery.txt" "$results_dir/$domain-content-discovery.txt"
         else
             warn "Skipping content discovery: neither ffuf nor dirsearch is installed"
             skipped_steps+=("Content discovery (missing: ffuf/dirsearch)")
