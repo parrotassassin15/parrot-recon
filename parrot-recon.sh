@@ -1,173 +1,414 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # WARNING! This tool is incredibly invasive and will make a lot of noise on a network it
 # is designed for bug bounties not pentests involving a blue team. please be careful when
-# using this tool. Also DISCLAIMER: I WILL NOT BE HELD RESPONSIBLE FOR ANY ILLEGAL ACTIVITY 
+# using this tool. Also DISCLAIMER: I WILL NOT BE HELD RESPONSIBLE FOR ANY ILLEGAL ACTIVITY
 # YOU DECIDE TO DO WITH THIS TOOL. IT WAS MADE FOR ETHICAL PURPOSES. PLEASE BE CARFUL!!!
- 
+
 # banner
 cat << "EOF"
-   ___                    __        ___                  
-  / _ \___ ____________  / /____   / _ \___ _______  ___ 
+   ___                    __        ___
+  / _ \___ ____________  / /____   / _ \___ _______  ___
  / ___/ _ `/ __/ __/ _ \/ __(_-<  / , _/ -_) __/ _ \/ _ \
 /_/   \_,_/_/ /_/  \___/\__/___/ /_/|_|\__/\__/\___/_//_/
 
-   /.\                          
-   |  \                  
-   /   \                 
-  //  /                  
+   /.\
+   |  \
+   /   \
+  //  /
   |/ /\__________________________________________________
- / /            
-/ /     
-\/ 
+ / /
+/ /
+\/
 EOF
 
+set -o pipefail
+
 # defines enviornment variables and terminal colors
-red=`tput setaf 1`
-white=`tput setaf 7`
-green=`tput setaf 2`
-blue=`tput setaf 4`
+if [ -t 1 ] && command -v tput >/dev/null 2>&1; then
+    red=$(tput setaf 1)
+    white=$(tput setaf 7)
+    green=$(tput setaf 2)
+    blue=$(tput setaf 4)
+    yellow=$(tput setaf 3)
+    reset=$(tput sgr0)
+else
+    red=""; white=""; green=""; blue=""; yellow=""; reset=""
+fi
+
 working_dir=$(cd -P -- "$(dirname -- "$0")" && pwd -P)
 results_dir=$working_dir/results
 tools_dir=$working_dir/tools
-format_newline='printf \n'
+tmp_dir=$(mktemp -d -t parrot-recon.XXXXXX)
 
+# every step that fails lands here so the run can finish and still report honestly
+declare -a failed_steps=()
+declare -a skipped_steps=()
 
-# argument parsing to decide what scan should be ran
+cleanup() {
+    rm -rf "$tmp_dir"
+}
+trap cleanup EXIT
+
 format_newline() {
     printf "\n"
+}
+
+info() { echo "${blue}[*]${reset} $*"; }
+step() { echo "${red}[+]${reset} $*"; }
+ok()   { echo "${green}[+]${reset} $*"; }
+warn() { echo "${yellow}[!]${reset} $*"; }
+err()  { echo "${red}[-]${reset} $*"; }
+
+# returns 0 if a command exists on PATH
+have() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# skip a step loudly instead of running a missing binary and producing an empty file
+require_tool() {
+    local tool=$1 label=$2
+    if have "$tool"; then
+        return 0
+    fi
+    warn "Skipping ${label}: '${tool}' is not installed (run the install script for your platform)"
+    skipped_steps+=("$label (missing: $tool)")
+    return 1
+}
+
+# runs a scan step, records the failure, never aborts the rest of the run
+run_step() {
+    local label=$1; shift
+    local rc=0
+    "$@" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+        return 0
+    fi
+    err "${label} failed (exit $rc)"
+    failed_steps+=("$label")
+    return 1
 }
 
 # Usage function
 usage() {
     format_newline
-    echo "${green}Usage:${white} $0 -d <domain> -t <scan-type> -w <wordlist> -c <api collection>"
+    echo "${green}Usage:${reset} $0 -d <domain> -t <scan-type> [-w <wordlist>] [-c <api collection>]"
     format_newline
     echo "Scan Types:"
-    echo "${red}API${white} - Enumerates an API and finds common misconfigurations"
-    echo "${red}WEB${white} - Enumerates a Web Application and runs a vulnerability scan"
-    echo "${red}ALL${white} - Performs both API and Web enumeration"
+    echo "${red}API${reset} - Enumerates an API and finds common misconfigurations (requires -c)"
+    echo "${red}WEB${reset} - Enumerates a Web Application and runs a vulnerability scan"
+    echo "${red}ALL${reset} - Performs both API and Web enumeration"
+    format_newline
+    echo "Options:"
+    echo "  -d  target domain (required)"
+    echo "  -t  scan type: API | WEB | ALL (required, case insensitive)"
+    echo "  -w  wordlist for content discovery (optional, WEB/ALL)"
+    echo "  -c  API collection file: .json (Postman) or .yaml/.yml (OpenAPI) - required for API"
+    echo "  -h  show this help"
     exit 0
 }
 
-api_scan(){
-    echo "[!] Starting API Scanning"
+# picks http vs https once instead of running every tool twice and hoping
+detect_scheme() {
+    local d=$1
+    if curl -s -k -m 15 -o /dev/null "https://$d"; then
+        echo "https"
+    elif curl -s -m 15 -o /dev/null "http://$d"; then
+        echo "http"
+    else
+        echo ""
+    fi
+}
 
-    echo "[+] Extracting API URLs from Collection File: $api_collection"
-    
-    case "$api_collection" in
+# ---------------------------------------------------------------------------
+# API scanning
+# ---------------------------------------------------------------------------
+
+# pulls URLs out of a Postman collection or an OpenAPI/Swagger spec
+extract_api_urls() {
+    local collection=$1 out=$2
+
+    case "$collection" in
         *.json)
-            echo "[*] JSON file detected. Extracting URLs using grep on $api_collection"
-            cat "$api_collection" | grep -oP '"raw":\s*"\Khttps?://[^"]+' > api_urls.txt
+            info "JSON collection detected. Extracting URLs from $collection"
+            grep -oE '"(raw|url)"[[:space:]]*:[[:space:]]*"https?://[^"]+"' "$collection" \
+                | grep -oE 'https?://[^"]+' \
+                | grep -v '{{' \
+                | sort -u > "$out"
             ;;
         *.yaml|*.yml)
-            echo "[*] YAML file detected. Extracting URLs using grep on $api_collection"
-            cat $api_collection | grep 'url' | cut -d ':' -f3 | tr -d ' ' | tr -d '"' | cut -d '/' -f3 | sed 's/^/https:\/\//' > api_urls.txt
+            info "YAML collection detected. Extracting URLs from $collection"
+            grep -oE 'https?://[^"'"'"' ]+' "$collection" \
+                | sed 's/[,]*$//' \
+                | grep -v '{{' \
+                | sort -u > "$out"
             ;;
         *)
-            echo "[!] Error: Unsupported file format. Please provide a .json or .yaml/.yml file."
+            err "Unsupported collection format: $collection (expected .json or .yaml/.yml)"
+            return 1
             ;;
     esac
 
-
-    echo "$blue[+] URLs extracted and saved to api_urls.txt$white"
-
-    url=$(cat api_urls.txt)
-
-    # url without https://
-    url_no_https=$(echo $url | sed 's/https:\/\///')
-
-    echo "$red[+] Starting Nmap Script Vuln Enumeration on Endpoint$white"
-    nmap -sV -sC -p 443 --script=vuln -oA $results_dir/nmap-api-vuln-scan $url_no_https
-    echo "$green[+] Nmap Script Vuln Enumeration Saved To: $results_dir/nmap-api-vuln-scan"
-
-    echo "$red[+] Starting Nitko Scan for API$white"
-    nikto -h $url -o $results_dir/nikto-api-scan.txt
-    echo "$green[+] Nikto Scan Saved To: $results_dir/nikto-api-scan.txt"
-
-    echo "$red[+] Checking for Authentication Bypass$white"
-    # Get the HTTP response code using cURL
-    response=$(curl -s -o /dev/null -w "%{http_code}" "$url")
-    # Output the URL and response code
-    echo "----------------- Results -------------------"
-    echo "$url - $response"
-    # Check if the response code is 200
-    if [ "$response" -eq 200 ]; then
-        echo "$red[-] Authentication bypass may be possible $white"
-    else
-        echo "$green[+] Authentication bypass may not not possible $white"
+    if [ ! -s "$out" ]; then
+        err "No absolute URLs found in $collection (Postman {{baseUrl}} variables cannot be resolved)"
+        return 1
     fi
-
-    exit 0
+    return 0
 }
 
+api_scan() {
+    format_newline
+    step "Starting API Scanning"
 
-scan_all(){
+    if [ -z "$api_collection" ]; then
+        err "API scan needs a collection file: -c <collection.json|collection.yaml>"
+        failed_steps+=("API scan (no -c collection supplied)")
+        return 1
+    fi
+
+    if [ ! -f "$api_collection" ]; then
+        err "Collection file not found: $api_collection"
+        failed_steps+=("API scan (collection not found)")
+        return 1
+    fi
+
+    local api_urls=$results_dir/$domain-api-urls.txt
+    if ! extract_api_urls "$api_collection" "$api_urls"; then
+        failed_steps+=("API URL extraction")
+        return 1
+    fi
+    ok "URLs extracted and saved to: $api_urls"
+
+    # unique hostnames for the host-level scans, full URLs for the request-level checks
+    local api_hosts=$tmp_dir/api-hosts.txt
+    awk -F/ '{print $3}' "$api_urls" | cut -d: -f1 | sort -u > "$api_hosts"
+    info "$(wc -l < "$api_urls") URL(s) across $(wc -l < "$api_hosts") host(s)"
+
+    local scanned
+    if require_tool nmap "Nmap API vuln scan"; then
+        step "Starting Nmap Script Vuln Enumeration on API Endpoints"
+        scanned=0
+        while read -r api_host; do
+            [ -n "$api_host" ] || continue
+            run_step "Nmap vuln scan ($api_host)" \
+                nmap -sV -sC -p 443 --script=vuln -oA "$results_dir/nmap-api-vuln-$api_host" "$api_host" \
+                && scanned=$((scanned + 1))
+        done < "$api_hosts"
+        [ "$scanned" -gt 0 ] \
+            && ok "Nmap Script Vuln Enumeration Saved To: $results_dir/nmap-api-vuln-<host>.* ($scanned host(s))"
+    fi
+
+    if require_tool nikto "Nikto API scan"; then
+        step "Starting Nikto Scan for API"
+        scanned=0
+        while read -r api_host; do
+            [ -n "$api_host" ] || continue
+            rm -f "$results_dir/nikto-api-$api_host.txt"
+            run_step "Nikto ($api_host)" \
+                nikto -h "$api_host" -o "$results_dir/nikto-api-$api_host.txt" \
+                && scanned=$((scanned + 1))
+        done < "$api_hosts"
+        [ "$scanned" -gt 0 ] \
+            && ok "Nikto Scan Saved To: $results_dir/nikto-api-<host>.txt ($scanned host(s))"
+    fi
+
+    if require_tool curl "Authentication bypass check"; then
+        step "Checking for Authentication Bypass"
+        local authfile=$results_dir/$domain-api-authcheck.txt
+        : > "$authfile"
+        echo "----------------- Results -------------------"
+        while read -r api_url; do
+            [ -n "$api_url" ] || continue
+            local response
+            response=$(curl -s -k -m 20 -o /dev/null -w "%{http_code}" "$api_url")
+            echo "$api_url - $response" | tee -a "$authfile"
+            # string compare: curl reports 000 on connection failure, which is not a number we can -eq on
+            if [ "$response" = "200" ]; then
+                err "Authentication bypass may be possible -> $api_url"
+                echo "  [-] unauthenticated 200, auth bypass may be possible" >> "$authfile"
+            elif [ "$response" = "000" ]; then
+                warn "No response from $api_url"
+                echo "  [!] no response" >> "$authfile"
+            else
+                ok "Authentication bypass may not be possible -> $api_url"
+            fi
+        done < "$api_urls"
+        ok "Auth Bypass Results Saved To: $authfile"
+    fi
+
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# WEB scanning
+# ---------------------------------------------------------------------------
+
+# the go SQL error probe lives in tools/ with its own go.mod, so it has to be
+# built from that directory or go cannot resolve the module
+sql_probe() {
+    local target=$1
+    local bin=$tmp_dir/parrot-sqltest
+
+    if ! (cd "$tools_dir" && go build -o "$bin" . >/dev/null 2>&1); then
+        err "Could not build $tools_dir/main.go (is the gotabulate module available?)"
+        return 1
+    fi
+
+    "$bin" -t "$target" 2>&1 | tee "$results_dir/$domain-sqlerror-probe.txt"
+    return 0
+}
+
+web_scan() {
+    format_newline
+    step "Starting Website Enumeration"
+
+    local target=$scheme://$domain
+
+    if require_tool go "Go SQL error probe"; then
+        run_step "SQL error probe" sql_probe "$target"
+        ok "SQL Error Probe Saved To: $results_dir/$domain-sqlerror-probe.txt"
+    fi
+
+    if require_tool lynx "URL DORK scan"; then
+        step "Starting URL DORK Scan"
+        run_step "URL dork scan" bash "$tools_dir/dork.sh" "$domain" "$results_dir/$domain-dork.txt"
+        ok "URL DORK Scan Saved To: $results_dir/$domain-dork.txt"
+    fi
+
+    if require_tool nmap "Nmap TCP scan"; then
+        step "Starting Nmap TCP Scan"
+        run_step "Nmap TCP scan" \
+            nmap -sV -sC "$domain" -oA "$results_dir/$domain-tcp-scan" --open
+        ok "Nmap TCP Scan Saved To: $results_dir/$domain-tcp-scan.*"
+    fi
+
+#    if require_tool nmap "Nmap UDP scan"; then
+#        step "Starting Nmap UDP Scan"
+#        run_step "Nmap UDP scan" nmap -sV -sU "$domain" -oA "$results_dir/$domain-udp-scan" --open
+#        ok "Nmap UDP Scan Saved To: $results_dir/$domain-udp-scan.*"
+#    fi
+
+    if require_tool wafw00f "IDS/IPS detection"; then
+        step "Starting IDS/IPS Detection"
+        run_step "wafw00f" wafw00f "$target" -o "$results_dir/wafw00f-$domain.txt"
+        ok "IDS/IPS Results Saved To: $results_dir/wafw00f-$domain.txt"
+    fi
+
+    if require_tool sublist3r "Subdomain enumeration"; then
+        step "Starting Subdomain Enumeration"
+        run_step "sublist3r" sublist3r -d "$domain" -o "$results_dir/subdomains-$domain.txt"
+        ok "Subdomains Saved To: $results_dir/subdomains-$domain.txt"
+    fi
+
+    if require_tool nikto "Nikto scan"; then
+        step "Starting Nikto Scan"
+        rm -f "$results_dir/nikto-$domain.txt"
+        run_step "Nikto" nikto -h "$domain" -o "$results_dir/nikto-$domain.txt"
+        ok "Nikto Scan Saved To: $results_dir/nikto-$domain.txt"
+    fi
+
+    if require_tool cmsmap "CMS enumeration"; then
+        step "Starting CMS Enumeration"
+        rm -f "$results_dir/cmsenum-$domain.txt"
+        # -s skips cert validation so a self-signed target does not kill the run
+        run_step "cmsmap" cmsmap -F -s "$target" -o "$results_dir/cmsenum-$domain.txt"
+        ok "CMS Enumeration Saved To: $results_dir/cmsenum-$domain.txt"
+    fi
+
+    if require_tool sslyze "SSL scans"; then
+        step "Starting SSL Scans"
+        # modern sslyze dropped --regular; a bare invocation already runs the full suite
+        run_step "sslyze full scan" \
+            bash -c 'sslyze "$1" > "$2" 2>&1' _ "$domain" "$results_dir/$domain-sslyze-regular.txt"
+        ok "Regular SSL Scan Saved To: $results_dir/$domain-sslyze-regular.txt"
+        run_step "sslyze heartbleed" \
+            bash -c 'sslyze --heartbleed "$1" > "$2" 2>&1' _ "$domain" "$results_dir/$domain-sslyze-heartbleed.txt"
+        ok "HeartBleed Scan Saved To: $results_dir/$domain-sslyze-heartbleed.txt"
+        run_step "sslyze robot" \
+            bash -c 'sslyze --robot "$1" > "$2" 2>&1' _ "$domain" "$results_dir/$domain-sslyze-robot.txt"
+        ok "Robot Scan Saved To: $results_dir/$domain-sslyze-robot.txt"
+    fi
+
+    if require_tool nuclei "Nuclei scans"; then
+        step "Starting Nuclei Scans"
+        run_step "nuclei" nuclei -u "$target" -o "$results_dir/nuclei-$domain.txt"
+        ok "Nuclei Scans Saved To: $results_dir/nuclei-$domain.txt"
+    fi
+
+    if require_tool python3 "Secure headers check"; then
+        step "Starting Secure Headers Check"
+        run_step "shcheck" \
+            bash -c 'python3 "$1" "$2" > "$3" 2>&1' _ "$tools_dir/shcheck.py" "$target" "$results_dir/$domain-shcheck.txt"
+        ok "Shcheck Results Saved To: $results_dir/$domain-shcheck.txt"
+
+        step "Starting CORS Enumeration"
+        run_step "cors_scanner" \
+            python3 "$tools_dir/cors_scanner.py" -u "$target" -csv "$results_dir/$domain-cors.csv"
+        ok "CORS Enumeration Results Saved To: $results_dir/$domain-cors.csv"
+    fi
+
+    # headi is built by the install script; it may be on PATH, dropped in tools/,
+    # or left as a binary inside its own cloned source directory
+    local headi_bin=""
+    for candidate in "$tools_dir/headi/headi" "$tools_dir/headi/main" "$tools_dir/headi-bin"; do
+        if [ -f "$candidate" ] && [ -x "$candidate" ]; then
+            headi_bin=$candidate
+            break
+        fi
+    done
+    if [ -z "$headi_bin" ] && [ -f "$tools_dir/headi" ] && [ -x "$tools_dir/headi" ]; then
+        headi_bin=$tools_dir/headi
+    fi
+    if [ -z "$headi_bin" ] && have headi; then
+        headi_bin=$(command -v headi)
+    fi
+
+    if [ -n "$headi_bin" ]; then
+        step "Starting HTTP HEADER INJECTION Enumeration"
+        run_step "headi" \
+            bash -c '"$1" -u "$2" > "$3" 2>&1' _ "$headi_bin" "$target/" "$results_dir/headi-$domain.txt"
+        ok "HTTP HEADER INJECTION Results Saved To: $results_dir/headi-$domain.txt"
+    else
+        warn "Skipping HTTP header injection: headi is not built (re-run the install script)"
+        skipped_steps+=("HTTP header injection (missing: headi)")
+    fi
+
+    # -w was accepted but never used before; wire it into content discovery
+    if [ -n "$wordlist" ]; then
+        if [ ! -f "$wordlist" ]; then
+            err "Wordlist not found: $wordlist"
+            failed_steps+=("Content discovery (wordlist not found)")
+        elif have ffuf; then
+            step "Starting Content Discovery (ffuf)"
+            run_step "ffuf" ffuf -u "$target/FUZZ" -w "$wordlist" -mc 200,201,204,301,302,307,401,403 \
+                -o "$results_dir/$domain-content-discovery.json" -of json
+            ok "Content Discovery Saved To: $results_dir/$domain-content-discovery.json"
+        elif have dirsearch; then
+            step "Starting Content Discovery (dirsearch)"
+            run_step "dirsearch" dirsearch -u "$target" -w "$wordlist" \
+                -o "$results_dir/$domain-content-discovery.txt"
+            ok "Content Discovery Saved To: $results_dir/$domain-content-discovery.txt"
+        else
+            warn "Skipping content discovery: neither ffuf nor dirsearch is installed"
+            skipped_steps+=("Content discovery (missing: ffuf/dirsearch)")
+        fi
+    fi
+
+    return 0
+}
+
+scan_all() {
+    # API first, then WEB - neither may exit, or the other never runs
     api_scan
     web_scan
 }
 
-web_scan(){
-    # enumerating websites domain using the tools from install script
-    echo "$blue[+] Starting Website Enumeration"
-    go run $tools_dir/main.go -t http://$domain || go run $tools_dir/main.go -t https://$domain   
-    echo "$red[+] Starting URL DORK Scan$white"
-    bash $tools_dir/dork.sh $domain > $results_dir/$domain-dork.txt
-    echo "$green[+] URL DORK Scan Saved To: $results_dir/$domain-dork.txt"
-
-    echo "$red[+] Starting Nmap TCP Scan$white"
-    nmap -sV -sC $domain -oA $results_dir/$domain-tcp-scan --open
-    echo "$green[+] Nmap TCP Scan Saved To: $results_dir/$domain-tcp-scan"
-
-#    echo "$red[+] Starting Nmap UDP Scan$white"
-#    nmap -sV -sU $domain -oA $results_dir/$domain-udp-scan --open 
-#    echo "$green[+] Nmap UDP Scan Saved To: $results_dir/$domain-udp-scan"
-
-    echo "$red[+] Starting IDS/IPS Detection $white"
-    wafw00f https://$domain -o $results_dir/wafw00f-$domain.txt || wafw00f http://$domain -o $results_dir/wafw00f-$domain.txt
-    echo "$green[+] IPS/IPS Results Saved To: $results_dir/wafw00f-$domain.txt"
-
-    echo "$red[+] Starting Subdomain Enumeration$white"
-    sublist3r -d $domain -o $results_dir/subdomains-$domain.txt 
-    echo "$green[+] Subdomains Saved To: $results_dir/subdomains-$domain.txt"
-
-    echo "$red[+] Starting Nikto Scan$white"
-    nikto -h $domain -o $results_dir/nikto-$domain.txt
-    echo "$green[+] Nikto Scan Saved To: $results_dir/nikto-$domain.txt"
-
-    echo "$red[+] Starting CMS Enumeration$white"
-    cmsmap -F https://$domain -o $results_dir/cmsenum-$domain.txt || cmsmap -F http://$domain -o $results_dir/cmsenum-$domain.txt
-    echo "$green[+] CMS Enumeration Saved To: $results_dir/cmsenum-$domain.txt"
-
-    echo "$red[+] Starting SSL Scans$white"
-    sslyze --regular $domain > $results_dir/$domain-sslyze-regular.txt
-    echo "$green[+] Regular SSL Scan Saved To: $results_dir/$domain-sslyze-regular.txt"
-    sslyze --heartbleed $domain > $results_dir/$domain-sslyze-heartbleed.txt
-    echo "$green[+] HeartBleed Scan Saved To: $results_dir/$domain-sslyze-heartbleed.txt"
-    sslyze --robot $domain > $results_dir/$domain-sslyze-robot.txt
-    echo "$green[+] Robot Scan Saved To: $results_dir/$domain-sslyze-robot.txt"
-
-    echo "$red[+] Starting Nuclei Scans$white"
-    nuclei -u $domain -o $results_dir/nuclei-$domain.txt
-    echo "$green[+] Neclei Scans Saved To: $results_dir/nuclei-$domain.txt"
-
-
-    echo "$red[+] Starting Secure Headers Check$white"
-    python3 $tools_dir/shcheck.py https://$domain > $results_dir/$domain-shcheck.txt || python3 $tools_dir/shcheck.py http://$domain > $results_dir/$domain-shcheck.txt
-    echo "$green[+] Shcheck Results Saved To: $results_dir/$domain-shcheck.txt"
-    
-    echo "$red[+] Starting CORS Enumeration$white"
-    python3 $tools_dir/cors_scanner.py -u https://$domain -csv $results_dir/$domain-cors.csv || python3 $tools_dir/cors_scanner.py -u http://$domain -csv $results_dir/$domain-cors.csv
-    echo "$green[+] CORS Enumaration Results Saved To: $results_dir/$domain-cors.csv"
-
-    echo "$red[+] Starting HTTP HEADER INJECTION Enumeration$white"
-    $tools_dir/headi -u https://$domain/ > $results_dir/headi-$domain.txt || headi -u http://$domain/ > $results_dir/headi-$domain.txt
-    echo "$green[+] HTTP HEADER INJECTION Results Saved To: $results_dir/headi-$domain.txt"
-}
-
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 # Parse command-line options
-while getopts ":d:t:w:h:c:" opt; do
+while getopts ":d:t:w:c:h" opt; do
     case ${opt} in
         d )
             domain=${OPTARG}
@@ -181,7 +422,7 @@ while getopts ":d:t:w:h:c:" opt; do
         h )
             usage
             ;;
-        c ) 
+        c )
             api_collection=${OPTARG}
             ;;
         \? )
@@ -201,6 +442,23 @@ if [ -z "$domain" ] || [ -z "$type" ]; then
     usage
 fi
 
+# accept web / Web / WEB
+type=$(echo "$type" | tr '[:lower:]' '[:upper:]')
+
+case "$type" in
+    API|WEB|ALL ) ;;
+    * )
+        echo "${red}Unknown scan type: $type${reset}"
+        usage
+        ;;
+esac
+
+# an API scan with no collection has nothing to scan - fail before doing any work
+if [ "$type" = "API" ] && [ -z "$api_collection" ]; then
+    echo "${red}An API scan requires a collection file: -c <collection.json|collection.yaml>${reset}"
+    usage
+fi
+
 # Check for root privileges
 if [ "$(id -u)" -ne 0 ]; then
     echo "${red}[!] This script must be run as root.${reset}"
@@ -209,32 +467,63 @@ fi
 
 # Environment setup
 format_newline
-echo "[+] Setting Up Environment"
-mkdir -p "$results_dir"
+step "Setting Up Environment"
+if ! mkdir -p "$results_dir" 2>/dev/null; then
+    err "Could not create results directory: $results_dir"
+    exit 1
+fi
+# a previous run under a different uid can leave this unwritable, which would
+# silently turn every "Saved To:" line into a lie
+if [ ! -w "$results_dir" ]; then
+    err "Results directory is not writable: $results_dir"
+    err "Fix the ownership (e.g. chown -R \$SUDO_USER $results_dir) and re-run"
+    exit 1
+fi
 
 # Output domain information
 format_newline
-echo "[*] Domain Name: $domain"
-ip_address=$(host $domain | awk '/has address/ { print $4 ; exit }')
-echo "[*] IP Address: $ip_address"
+info "Domain Name: $domain"
+ip_address=$(host "$domain" 2>/dev/null | awk '/has address/ { print $4 ; exit }')
+if [ -z "$ip_address" ]; then
+    err "Could not resolve $domain - check the domain name and your DNS"
+    exit 1
+fi
+info "IP Address: $ip_address"
+
+# resolve the scheme once so no step has to guess
+scheme=""
+if [ "$type" = "WEB" ] || [ "$type" = "ALL" ]; then
+    scheme=$(detect_scheme "$domain")
+    if [ -z "$scheme" ]; then
+        err "$domain answered on neither https nor http - aborting web scan"
+        exit 1
+    fi
+    info "Scheme: $scheme://$domain"
+fi
+
+if [ "$type" = "ALL" ] && [ -z "$api_collection" ]; then
+    warn "No -c collection supplied, skipping the API portion of the ALL scan"
+    skipped_steps+=("API scan (no -c collection supplied)")
+fi
 
 # Scan configuration
 scan_config() {
     case $type in
         "API" )
-            echo "${green}[+] Running an API scan on $domain${reset}"
+            ok "Running an API scan on $domain"
             api_scan
             ;;
         "WEB" )
-            echo "${green}[+] Running a WEB scan on $domain${reset}"
+            ok "Running a WEB scan on $domain"
             web_scan
             ;;
         "ALL" )
-            echo "${green}[+] Running both API and WEB scans on $domain${reset}"
-            ;;
-        * )
-            echo "${red}Unknown scan type: $type${reset}"
-            usage
+            ok "Running both API and WEB scans on $domain"
+            if [ -n "$api_collection" ]; then
+                scan_all
+            else
+                web_scan
+            fi
             ;;
     esac
 }
@@ -242,11 +531,24 @@ scan_config() {
 scan_config
 
 
-#echo "$red[+] Sending Completion Email "
+#step "Sending Completion Email "
 #python3 mailserver/sendemail.py
 
-#echo "$red[+] Opening Web Server"
+#step "Opening Web Server"
 #python3 webdav/webserver.py
 
-echo "$red[+] Script Done!$white"
-echo "$red[+] Check Your WebDAV For The Results!$white"
+format_newline
+if [ ${#skipped_steps[@]} -gt 0 ]; then
+    warn "Skipped ${#skipped_steps[@]} step(s):"
+    for s in "${skipped_steps[@]}"; do echo "    - $s"; done
+fi
+if [ ${#failed_steps[@]} -gt 0 ]; then
+    err "${#failed_steps[@]} step(s) failed:"
+    for s in "${failed_steps[@]}"; do echo "    - $s"; done
+fi
+
+step "Script Done!"
+step "Check Your WebDAV For The Results! ($results_dir)"
+
+# non-zero exit when something actually broke, so this can be chained in CI
+[ ${#failed_steps[@]} -eq 0 ]
