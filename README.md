@@ -49,7 +49,8 @@ files) will not run without it.
 - Search-engine dorking (`tools/dork.sh`)
 - Nmap TCP service/script scan
 - WAF / IDS / IPS detection (wafw00f)
-- Subdomain enumeration (sublist3r)
+- Subdomain enumeration (`tools/subenum.sh` — certspotter, crt.sh, hackertarget,
+  rapiddns, plus subfinder/sublist3r when installed)
 - Nikto
 - CMS enumeration (cmsmap)
 - SSL/TLS scans — full, Heartbleed, ROBOT (sslyze)
@@ -126,6 +127,15 @@ non-zero if anything failed, so it can be chained in CI.
   lynx a JS wall and returns nothing. If an engine rate-limits the run, the
   script says so rather than silently reporting zero results. Raise the gap
   between queries with `DORK_DELAY=<seconds>`.
+- **Subdomain enumeration aggregates several sources** instead of trusting
+  sublist3r alone. Most of sublist3r's engines are dead (Baidu/Yahoo/Ask return
+  nothing, DNSdumpster crashes, VirusTotal blocks), and it writes no file at all
+  when it finds nothing. `tools/subenum.sh` merges every source that answers and
+  exits non-zero only when *all* of them fail — so "no subdomains" and "we were
+  blocked" are no longer the same result.
+- **cmsmap does not use `-F`.** cmsmap's own help calls fullscan
+  *"False positives and slow!"*, and it was the step that stalled long runs.
+  Set `CMSMAP_FULL=1` to opt back in.
 
 ## Requirements / gotchas
 
