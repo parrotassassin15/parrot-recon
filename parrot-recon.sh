@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
-# WARNING! This tool is incredibly invasive and will make a lot of noise on a network it
-# is designed for bug bounties not pentests involving a blue team. please be careful when
-# using this tool. Also DISCLAIMER: I WILL NOT BE HELD RESPONSIBLE FOR ANY ILLEGAL ACTIVITY
-# YOU DECIDE TO DO WITH THIS TOOL. IT WAS MADE FOR ETHICAL PURPOSES. PLEASE BE CARFUL!!!
+# WARNING! This tool is incredibly invasive and will make a lot of noise on a network. It
+# is designed for bug bounties, not pentests involving a blue team. Please be careful when
+# using this tool. DISCLAIMER: I WILL NOT BE HELD RESPONSIBLE FOR ANY ILLEGAL ACTIVITY
+# YOU DECIDE TO DO WITH THIS TOOL. IT WAS MADE FOR ETHICAL PURPOSES. PLEASE BE CAREFUL!
 
 # banner
 cat << "EOF"
@@ -24,7 +24,7 @@ EOF
 
 set -o pipefail
 
-# defines enviornment variables and terminal colors
+# defines environment variables and terminal colors
 if [ -t 1 ] && command -v tput >/dev/null 2>&1; then
     red=$(tput setaf 1)
     green=$(tput setaf 2)
@@ -40,6 +40,19 @@ results_dir=$working_dir/results
 tools_dir=$working_dir/tools
 tmp_dir=$(mktemp -d -t parrot-recon.XXXXXX)
 
+# Default options
+server_port=${RECON_PORT:-8098}
+enable_server=0
+enable_udp=0
+mail_recipient=""
+api_collection=""
+domain=""
+type=""
+wordlist=""
+
+scan_start_time=$(date +%s)
+scan_start_date=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
 # every step that fails lands here so the run can finish and still report honestly
 declare -a failed_steps=()
 declare -a skipped_steps=()
@@ -47,7 +60,7 @@ declare -a skipped_steps=()
 cleanup() {
     rm -rf "$tmp_dir"
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
 format_newline() {
     printf "\n"
@@ -88,9 +101,7 @@ run_step() {
     return 1
 }
 
-# several tools exit 0 having written nothing at all - sublist3r only creates
-# its output file when it actually found subdomains - so confirm the artifact
-# exists before claiming we saved it
+# several tools exit 0 having written nothing at all - confirm the artifact exists
 saved() {
     local msg=$1 file=$2
     if [ -s "$file" ]; then
@@ -101,9 +112,7 @@ saved() {
     return 1
 }
 
-# sslyze exits non-zero whenever a scan command reports a problem (an expired
-# cert, a refused cipher probe) even though the report itself is complete, so
-# judge it by the report it produced rather than by its exit code
+# sslyze exits non-zero whenever a scan command reports a problem
 run_sslyze() {
     local label=$1 out=$2; shift 2
     sslyze "$@" > "$out" 2>&1
@@ -118,19 +127,32 @@ run_sslyze() {
 # Usage function
 usage() {
     format_newline
-    echo "${green}Usage:${reset} $0 -d <domain> -t <scan-type> [-w <wordlist>] [-c <api collection>]"
+    echo "${green}Usage:${reset} $0 -d <domain> -t <scan-type> [options]"
     format_newline
     echo "Scan Types:"
-    echo "${red}API${reset} - Enumerates an API and finds common misconfigurations (requires -c)"
-    echo "${red}WEB${reset} - Enumerates a Web Application and runs a vulnerability scan"
-    echo "${red}ALL${reset} - Performs both API and Web enumeration"
+    echo "  ${red}API${reset} - Enumerates an API and finds common misconfigurations (requires -c)"
+    echo "  ${red}WEB${reset} - Enumerates a Web Application and runs vulnerability scanning"
+    echo "  ${red}ALL${reset} - Performs both API and Web enumeration"
     format_newline
     echo "Options:"
-    echo "  -d  target domain (required)"
-    echo "  -t  scan type: API | WEB | ALL (required, case insensitive)"
-    echo "  -w  wordlist for content discovery (optional, WEB/ALL)"
-    echo "  -c  API collection file: .json (Postman) or .yaml/.yml (OpenAPI) - required for API"
-    echo "  -h  show this help"
+    echo "  -d <domain>      Target domain (required)"
+    echo "  -t <type>        Scan type: API | WEB | ALL (required, case insensitive)"
+    echo "  -w <wordlist>    Wordlist for content discovery (optional, WEB/ALL)"
+    echo "  -c <collection>  API collection file: .json (Postman) or .yaml/.yml (OpenAPI) - required for API"
+    echo "  -m <email>       Recipient email for completion notification via Mailgun"
+    echo "  -s               Launch local Results Web Server & WebDAV Explorer upon completion"
+    echo "  -p <port>        Port for Results Web Server (default: 8098)"
+    echo "  -u               Enable Nmap UDP port scan (scans top 100 ports)"
+    echo "  -o <dir>         Custom output directory (default: results/)"
+    echo "  -h               Show this help menu"
+    format_newline
+    echo "Environment Variables:"
+    echo "  MAILGUN_API_KEY  Mailgun Private API Key"
+    echo "  MAILGUN_DOMAIN   Mailgun Sending Domain"
+    echo "  MAILGUN_TO       Default recipient email"
+    echo "  MAILGUN_REGION   Mailgun API region: 'us' (default) or 'eu'"
+    echo "  RECON_PORT       Default port for results web server (default: 8098)"
+    echo "  CMSMAP_FULL      Set to 1 to enable cmsmap fullscan (-F)"
     exit 0
 }
 
@@ -205,7 +227,7 @@ api_scan() {
     fi
     ok "URLs extracted and saved to: $api_urls"
 
-    # unique hostnames for the host-level scans, full URLs for the request-level checks
+    # unique hostnames for host-level scans
     local api_hosts=$tmp_dir/api-hosts.txt
     awk -F/ '{print $3}' "$api_urls" | cut -d: -f1 | sort -u > "$api_hosts"
     info "$(wc -l < "$api_urls") URL(s) across $(wc -l < "$api_hosts") host(s)"
@@ -230,7 +252,6 @@ api_scan() {
         while read -r api_host; do
             [ -n "$api_host" ] || continue
             rm -f "$results_dir/nikto-api-$api_host.txt"
-            # -o is a prefix; nikto appends ".<format>" to it
             run_step "Nikto ($api_host)" \
                 nikto -h "$api_host" -Format txt -o "$results_dir/nikto-api-$api_host" \
                 && scanned=$((scanned + 1))
@@ -249,7 +270,6 @@ api_scan() {
             local response
             response=$(curl -s -k -m 20 -o /dev/null -w "%{http_code}" "$api_url")
             echo "$api_url - $response" | tee -a "$authfile"
-            # string compare: curl reports 000 on connection failure, which is not a number we can -eq on
             if [ "$response" = "200" ]; then
                 err "Authentication bypass may be possible -> $api_url"
                 echo "  [-] unauthenticated 200, auth bypass may be possible" >> "$authfile"
@@ -270,8 +290,6 @@ api_scan() {
 # WEB scanning
 # ---------------------------------------------------------------------------
 
-# the go SQL error probe lives in tools/ with its own go.mod, so it has to be
-# built from that directory or go cannot resolve the module
 sql_probe() {
     local target=$1
     local bin=$tmp_dir/parrot-sqltest
@@ -309,11 +327,14 @@ web_scan() {
             && ok "Nmap TCP Scan Saved To: $results_dir/$domain-tcp-scan.*"
     fi
 
-#    if require_tool nmap "Nmap UDP scan"; then
-#        step "Starting Nmap UDP Scan"
-#        run_step "Nmap UDP scan" nmap -sV -sU "$domain" -oA "$results_dir/$domain-udp-scan" --open
-#        ok "Nmap UDP Scan Saved To: $results_dir/$domain-udp-scan.*"
-#    fi
+    if [ "$enable_udp" -eq 1 ]; then
+        if require_tool nmap "Nmap UDP scan"; then
+            step "Starting Nmap UDP Scan (Top 100 Ports)"
+            run_step "Nmap UDP scan" \
+                nmap -sV -sU --top-ports 100 "$domain" -oA "$results_dir/$domain-udp-scan" --open \
+                && ok "Nmap UDP Scan Saved To: $results_dir/$domain-udp-scan.*"
+        fi
+    fi
 
     if require_tool wafw00f "IDS/IPS detection"; then
         step "Starting IDS/IPS Detection"
@@ -323,22 +344,23 @@ web_scan() {
 
     if require_tool curl "Subdomain enumeration"; then
         step "Starting Subdomain Enumeration"
-        # tools/subenum.sh aggregates certspotter, crt.sh, hackertarget,
-        # rapiddns and (when installed) subfinder/sublist3r. sublist3r alone is
-        # no longer sufficient: most of its engines are dead or blocking, and it
-        # writes no file at all when it finds nothing.
         run_step "subdomain enumeration" \
             bash "$tools_dir/subenum.sh" "$domain" "$results_dir/subdomains-$domain.txt" \
             && saved "Subdomains Saved To: $results_dir/subdomains-$domain.txt" \
                      "$results_dir/subdomains-$domain.txt"
+
+        # If subdomains were found and subzy is installed, run subdomain takeover detection
+        if [ -s "$results_dir/subdomains-$domain.txt" ] && have subzy; then
+            step "Starting Subdomain Takeover Enumeration (subzy)"
+            run_step "Subdomain takeover" \
+                subzy run --targets "$results_dir/subdomains-$domain.txt" --hide_fails --verify_ssl > "$results_dir/takeover-$domain.txt" 2>&1 \
+                && saved "Subdomain Takeover Results Saved To: $results_dir/takeover-$domain.txt" "$results_dir/takeover-$domain.txt"
+        fi
     fi
 
     if require_tool nikto "Nikto scan"; then
         step "Starting Nikto Scan"
         rm -f "$results_dir/nikto-$domain.txt"
-        # nikto treats -o as a PREFIX and appends ".<format>", so passing
-        # "...nikto-domain.txt" produced "nikto-domain.txt.txt". Give it the
-        # bare prefix and name the format explicitly.
         run_step "Nikto" nikto -h "$domain" -Format txt -o "$results_dir/nikto-$domain" \
             && saved "Nikto Scan Saved To: $results_dir/nikto-$domain.txt" "$results_dir/nikto-$domain.txt"
     fi
@@ -346,10 +368,6 @@ web_scan() {
     if require_tool cmsmap "CMS enumeration"; then
         step "Starting CMS Enumeration"
         rm -f "$results_dir/cmsenum-$domain.txt"
-        # -s skips cert validation so a self-signed target does not kill the run.
-        # -F (fullscan) is deliberately NOT used: cmsmap's own help describes it
-        # as "False positives and slow!", and it was the step that stalled long
-        # runs. Set CMSMAP_FULL=1 to opt back into it.
         cmsmap_args=(-s)
         [ "${CMSMAP_FULL:-0}" = "1" ] && cmsmap_args=(-F -s)
         run_step "cmsmap" cmsmap "${cmsmap_args[@]}" "$target" -o "$results_dir/cmsenum-$domain.txt" \
@@ -358,7 +376,6 @@ web_scan() {
 
     if require_tool sslyze "SSL scans"; then
         step "Starting SSL Scans"
-        # modern sslyze dropped --regular; a bare invocation already runs the full suite
         run_sslyze "sslyze full scan" "$results_dir/$domain-sslyze-regular.txt" "$domain" \
             && saved "Regular SSL Scan Saved To: $results_dir/$domain-sslyze-regular.txt" "$results_dir/$domain-sslyze-regular.txt"
         run_sslyze "sslyze heartbleed" "$results_dir/$domain-sslyze-heartbleed.txt" --heartbleed "$domain" \
@@ -385,8 +402,6 @@ web_scan() {
             && saved "CORS Enumeration Results Saved To: $results_dir/$domain-cors.csv" "$results_dir/$domain-cors.csv"
     fi
 
-    # headi is built by the install script; it may be on PATH, dropped in tools/,
-    # or left as a binary inside its own cloned source directory
     local headi_bin=""
     for candidate in "$tools_dir/headi/headi" "$tools_dir/headi/main" "$tools_dir/headi-bin"; do
         if [ -f "$candidate" ] && [ -x "$candidate" ]; then
@@ -411,7 +426,6 @@ web_scan() {
         skipped_steps+=("HTTP header injection (missing: headi)")
     fi
 
-    # -w was accepted but never used before; wire it into content discovery
     if [ -n "$wordlist" ]; then
         if [ ! -f "$wordlist" ]; then
             err "Wordlist not found: $wordlist"
@@ -436,17 +450,239 @@ web_scan() {
 }
 
 scan_all() {
-    # API first, then WEB - neither may exit, or the other never runs
     api_scan
     web_scan
+}
+
+# ---------------------------------------------------------------------------
+# Executive Summary Report Generator
+# ---------------------------------------------------------------------------
+generate_summary() {
+    local summary_md=$results_dir/$domain-summary.md
+    local summary_html=$results_dir/$domain-summary.html
+    local scan_end_time
+    scan_end_time=$(date +%s)
+    local scan_duration=$((scan_end_time - scan_start_time))
+    local scan_end_date
+    scan_end_date=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+
+    # Extract metrics
+    local sub_count=0
+    [ -f "$results_dir/subdomains-$domain.txt" ] && sub_count=$(wc -l < "$results_dir/subdomains-$domain.txt" 2>/dev/null || echo "0")
+
+    local open_tcp_ports=""
+    if [ -f "$results_dir/$domain-tcp-scan.nmap" ]; then
+        open_tcp_ports=$(grep -E '^[0-9]+/tcp[[:space:]]+open' "$results_dir/$domain-tcp-scan.nmap" 2>/dev/null | awk '{print $1 " (" $3 ")"}' | paste -sd ", " -)
+    fi
+    [ -z "$open_tcp_ports" ] && open_tcp_ports="None detected"
+
+    local open_udp_ports=""
+    if [ -f "$results_dir/$domain-udp-scan.nmap" ]; then
+        open_udp_ports=$(grep -E '^[0-9]+/udp[[:space:]]+open' "$results_dir/$domain-udp-scan.nmap" 2>/dev/null | awk '{print $1 " (" $3 ")"}' | paste -sd ", " -)
+    fi
+    [ -z "$open_udp_ports" ] && open_udp_ports="None / Not scanned"
+
+    local nuclei_count=0
+    local nuclei_high=0
+    if [ -f "$results_dir/nuclei-$domain.txt" ]; then
+        nuclei_count=$(wc -l < "$results_dir/nuclei-$domain.txt" 2>/dev/null || echo "0")
+        nuclei_high=$(grep -E -i '\[(critical|high)\]' "$results_dir/nuclei-$domain.txt" 2>/dev/null | wc -l || echo "0")
+    fi
+
+    local waf_info="Unknown / None"
+    if [ -f "$results_dir/wafw00f-$domain.txt" ]; then
+        local waf_line
+        waf_line=$(grep -E "(is behind|Site.*is protected)" "$results_dir/wafw00f-$domain.txt" 2>/dev/null | head -n 1)
+        [ -n "$waf_line" ] && waf_info="$waf_line"
+    fi
+
+    local cms_info="Unknown / None"
+    if [ -f "$results_dir/cmsenum-$domain.txt" ]; then
+        local cms_line
+        cms_line=$(grep -E "(WordPress|Joomla|Drupal|vBulletin)" "$results_dir/cmsenum-$domain.txt" 2>/dev/null | head -n 1)
+        [ -n "$cms_line" ] && cms_info="$cms_line"
+    fi
+
+    local cors_findings="None"
+    if [ -f "$results_dir/$domain-cors.csv" ]; then
+        local cors_count
+        cors_count=$(wc -l < "$results_dir/$domain-cors.csv" 2>/dev/null || echo "0")
+        [ "$cors_count" -gt 1 ] && cors_findings="$((cors_count - 1)) potential misconfiguration(s) flagged"
+    fi
+
+    local api_urls_count=0
+    [ -f "$results_dir/$domain-api-urls.txt" ] && api_urls_count=$(wc -l < "$results_dir/$domain-api-urls.txt" 2>/dev/null || echo "0")
+
+    local api_auth_bypass=0
+    if [ -f "$results_dir/$domain-api-authcheck.txt" ]; then
+        api_auth_bypass=$(grep -c "unauthenticated 200" "$results_dir/$domain-api-authcheck.txt" 2>/dev/null || echo "0")
+    fi
+
+    # Build Markdown Summary
+    cat << EOF > "$summary_md"
+# Parrot Recon - Scan Summary Report
+
+**Target Domain:** \`$domain\`  
+**Target IP:** \`$ip_address\`  
+**Scan Type:** \`$type\`  
+**Resolved Scheme:** \`$scheme://$domain\`  
+**Start Time:** $scan_start_date  
+**Finish Time:** $scan_end_date  
+**Scan Duration:** ${scan_duration}s  
+
+---
+
+## Executive Overview
+
+| Metric | Result |
+| :--- | :--- |
+| **Discovered Subdomains** | $sub_count |
+| **Open TCP Ports** | $open_tcp_ports |
+| **Open UDP Ports** | $open_udp_ports |
+| **WAF / IDS Detection** | $waf_info |
+| **CMS Enumeration** | $cms_info |
+| **Nuclei Vulnerabilities** | $nuclei_count ($nuclei_high Critical/High) |
+| **CORS Findings** | $cors_findings |
+| **API Endpoints Analyzed** | $api_urls_count |
+| **Unauthenticated API Hits (200 OK)** | $api_auth_bypass |
+
+---
+
+## Scan Health & Execution
+
+- **Failed Steps:** ${#failed_steps[@]}
+- **Skipped Steps:** ${#skipped_steps[@]}
+
+EOF
+
+    if [ ${#failed_steps[@]} -gt 0 ]; then
+        echo "### Failed Steps" >> "$summary_md"
+        for s in "${failed_steps[@]}"; do echo "- $s" >> "$summary_md"; done
+        echo "" >> "$summary_md"
+    fi
+
+    if [ ${#skipped_steps[@]} -gt 0 ]; then
+        echo "### Skipped Steps" >> "$summary_md"
+        for s in "${skipped_steps[@]}"; do echo "- $s" >> "$summary_md"; done
+        echo "" >> "$summary_md"
+    fi
+
+    cat << EOF >> "$summary_md"
+---
+
+## Generated Artifacts
+
+EOF
+    for art in "$results_dir"/*"$domain"*; do
+        if [ -f "$art" ]; then
+            echo "- \`$(basename "$art")\` ($(du -h "$art" 2>/dev/null | cut -f1))" >> "$summary_md"
+        fi
+    done
+
+    # Generate HTML summary
+    cat << EOF > "$summary_html"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Parrot Recon Summary - $domain</title>
+<style>
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0d1117; color: #c9d1d9; padding: 24px; line-height: 1.6; }
+.card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 24px; max-width: 900px; margin: 0 auto 20px auto; }
+h1, h2, h3 { color: #f0f6fc; margin-bottom: 12px; }
+table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+th, td { padding: 10px 14px; border: 1px solid #30363d; text-align: left; }
+th { background: #1f242c; color: #58a6ff; font-weight: 600; }
+code { background: #21262d; padding: 2px 6px; border-radius: 4px; font-family: monospace; color: #79c0ff; }
+</style>
+</head>
+<body>
+<div class="card">
+<h1>🦜 Parrot Recon Executive Summary</h1>
+<p><strong>Target:</strong> <code>$domain</code> (<code>$ip_address</code>) | <strong>Scan Type:</strong> <code>$type</code> | <strong>Duration:</strong> ${scan_duration}s</p>
+<hr style="border:0; border-top:1px solid #30363d; margin:16px 0;">
+<h2>Findings Overview</h2>
+<table>
+<tr><th>Category</th><th>Finding / Status</th></tr>
+<tr><td>Discovered Subdomains</td><td><strong>$sub_count</strong></td></tr>
+<tr><td>Open TCP Ports</td><td>$open_tcp_ports</td></tr>
+<tr><td>Open UDP Ports</td><td>$open_udp_ports</td></tr>
+<tr><td>WAF / IDS Status</td><td>$waf_info</td></tr>
+<tr><td>CMS Detection</td><td>$cms_info</td></tr>
+<tr><td>Nuclei Vulnerability Alerts</td><td><strong>$nuclei_count</strong> ($nuclei_high Critical/High)</td></tr>
+<tr><td>CORS Misconfigurations</td><td>$cors_findings</td></tr>
+<tr><td>API Endpoints Enumerated</td><td>$api_urls_count</td></tr>
+<tr><td>Unauthenticated API Responses (200)</td><td><strong>$api_auth_bypass</strong></td></tr>
+</table>
+</div>
+</body>
+</html>
+EOF
+
+    ok "Executive summary generated: $summary_md"
+}
+
+# ---------------------------------------------------------------------------
+# Mailgun Notification Dispatcher
+# ---------------------------------------------------------------------------
+dispatch_email() {
+    local recipient="${mail_recipient:-${MAILGUN_TO:-}}"
+    if [ -z "$recipient" ]; then
+        return 0
+    fi
+
+    format_newline
+    step "Dispatching Scan Completion Email via Mailgun"
+    if [ -z "${MAILGUN_API_KEY:-}" ] || [ -z "${MAILGUN_DOMAIN:-}" ]; then
+        warn "Mailgun notifications requested for '$recipient', but MAILGUN_API_KEY or MAILGUN_DOMAIN is unset."
+        warn "Export these environment variables to activate automated email delivery."
+        skipped_steps+=("Mailgun notification (missing credentials)")
+        return 0
+    fi
+
+    if require_tool python3 "Mailgun email dispatcher"; then
+        run_step "Mailgun notification" \
+            python3 "$working_dir/mailserver/sendemail.py" \
+                -d "$domain" \
+                -t "$type" \
+                -m "$recipient" \
+                --summary-file "$results_dir/$domain-summary.md" \
+                --html-file "$results_dir/$domain-summary.html" \
+                --results-dir "$results_dir" \
+            && ok "Completion email dispatched to $recipient"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Local Results Web Server / WebDAV Launcher
+# ---------------------------------------------------------------------------
+launch_server() {
+    if [ "$enable_server" -eq 1 ]; then
+        format_newline
+        step "Starting Local Results Web Server & WebDAV Explorer"
+        info "Results Dashboard URL: http://127.0.0.1:$server_port/"
+        info "Press Ctrl+C to terminate the server when finished viewing results."
+        python3 "$working_dir/webdav/serve_results.py" -p "$server_port" -d "$results_dir"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Fix File Permissions
+# ---------------------------------------------------------------------------
+fix_permissions() {
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+        local user_group
+        user_group=$(id -gn "$SUDO_USER" 2>/dev/null || echo "$SUDO_USER")
+        chown -R "$SUDO_USER:$user_group" "$results_dir" 2>/dev/null \
+            && info "Adjusted ownership of $results_dir to $SUDO_USER:$user_group"
+    fi
 }
 
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
-# Parse command-line options
-while getopts ":d:t:w:c:h" opt; do
+while getopts ":d:t:w:c:m:p:o:ush" opt; do
     case ${opt} in
         d )
             domain=${OPTARG}
@@ -457,11 +693,26 @@ while getopts ":d:t:w:c:h" opt; do
         w )
             wordlist=${OPTARG}
             ;;
-        h )
-            usage
-            ;;
         c )
             api_collection=${OPTARG}
+            ;;
+        m )
+            mail_recipient=${OPTARG}
+            ;;
+        s )
+            enable_server=1
+            ;;
+        p )
+            server_port=${OPTARG}
+            ;;
+        u )
+            enable_udp=1
+            ;;
+        o )
+            results_dir=${OPTARG}
+            ;;
+        h )
+            usage
             ;;
         \? )
             echo "${red}Invalid option: -${OPTARG}${reset}" >&2
@@ -480,7 +731,12 @@ if [ -z "$domain" ] || [ -z "$type" ]; then
     usage
 fi
 
-# accept web / Web / WEB
+# Sanitize domain format (prevent metacharacter injections)
+if ! [[ "$domain" =~ ^[a-zA-Z0-9.-]+$ ]]; then
+    echo "${red}Invalid domain format: '$domain'. Only alphanumeric, dots, and hyphens are permitted.${reset}"
+    exit 1
+fi
+
 type=$(echo "$type" | tr '[:lower:]' '[:upper:]')
 
 case "$type" in
@@ -491,7 +747,6 @@ case "$type" in
         ;;
 esac
 
-# an API scan with no collection has nothing to scan - fail before doing any work
 if [ "$type" = "API" ] && [ -z "$api_collection" ]; then
     echo "${red}An API scan requires a collection file: -c <collection.json|collection.yaml>${reset}"
     usage
@@ -510,15 +765,12 @@ if ! mkdir -p "$results_dir" 2>/dev/null; then
     err "Could not create results directory: $results_dir"
     exit 1
 fi
-# a previous run under a different uid can leave this unwritable, which would
-# silently turn every "Saved To:" line into a lie
 if [ ! -w "$results_dir" ]; then
     err "Results directory is not writable: $results_dir"
     err "Fix the ownership (e.g. chown -R \$SUDO_USER $results_dir) and re-run"
     exit 1
 fi
 
-# Output domain information
 format_newline
 info "Domain Name: $domain"
 ip_address=$(host "$domain" 2>/dev/null | awk '/has address/ { print $4 ; exit }')
@@ -528,7 +780,6 @@ if [ -z "$ip_address" ]; then
 fi
 info "IP Address: $ip_address"
 
-# resolve the scheme once so no step has to guess
 scheme=""
 if [ "$type" = "WEB" ] || [ "$type" = "ALL" ]; then
     scheme=$(detect_scheme "$domain")
@@ -544,7 +795,6 @@ if [ "$type" = "ALL" ] && [ -z "$api_collection" ]; then
     skipped_steps+=("API scan (no -c collection supplied)")
 fi
 
-# Scan configuration
 scan_config() {
     case $type in
         "API" )
@@ -568,12 +818,14 @@ scan_config() {
 
 scan_config
 
+# Generate summary report
+generate_summary
 
-#step "Sending Completion Email "
-#python3 mailserver/sendemail.py
+# Dispatch completion email if configured
+dispatch_email
 
-#step "Opening Web Server"
-#python3 webdav/webserver.py
+# Fix results directory permissions for the non-root sudo caller
+fix_permissions
 
 format_newline
 if [ ${#skipped_steps[@]} -gt 0 ]; then
@@ -586,7 +838,10 @@ if [ ${#failed_steps[@]} -gt 0 ]; then
 fi
 
 step "Script Done!"
-step "Check Your WebDAV For The Results! ($results_dir)"
+step "Check your results in: $results_dir"
+
+# Launch results web server / WebDAV browser if -s was supplied
+launch_server
 
 # non-zero exit when something actually broke, so this can be chained in CI
 [ ${#failed_steps[@]} -eq 0 ]

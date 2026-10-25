@@ -1,23 +1,13 @@
 #!/usr/bin/env python3
+"""
+Parrot Recon - WebDAV & Web Server Handler
+Wrapper around webdav/serve_results.py for backward compatibility.
+"""
+import os
+import sys
 
-# beta webdav handler
-# dev: parrotassassin15
+base_dir = os.path.dirname(os.path.abspath(__file__))
+serve_script = os.path.join(base_dir, "serve_results.py")
 
-
-# imports
-from time import sleep as delay 
-from os import system as s
-
-
-global host
-host = "http://127.0.0.1:8098"
-
-def main():
-    s("sudo service wsgidav start")
-    print("Please wait...")
-    for x in reversed(range(1,4)):
-        print(x)
-        delay(2)
-    print("web dav server started. visit " + host)
-
-main()
+if __name__ == "__main__":
+    os.execv(sys.executable, [sys.executable, serve_script] + sys.argv[1:])
